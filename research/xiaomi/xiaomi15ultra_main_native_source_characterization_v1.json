@@ -1,0 +1,51 @@
+{
+  "schema": "m11camera.xiaomi.source_characterization.v1.main",
+  "evidence_class": "reused_prior_xiaomi_source_audit_not_yet_recaptured_in_m11camera",
+  "source_lineage": {
+    "repository": "mwilliams455/M9Camera_refresh",
+    "branch": "m9sourcecal2a-nativeprospective1a-reviewfix1",
+    "file": "forensics/XIAOMI_MAIN_NATIVE_VS_COBALT_SOURCECAL_v1.json"
+  },
+  "camera": "Xiaomi 15 Ultra rear wide/main RAW physical camera",
+  "historical_corpus": "12 Open Camera DNGs from the fixed M9 regression/capture corpus",
+  "stability_observation": "ColorMatrix1/2, CameraCalibration1/2 and ForwardMatrix1/2 were identical across all 12 inspected DNGs; AsShotNeutral varied by scene",
+  "calibration_illuminants": {
+    "1": {"name": "D65", "dng_code": 21},
+    "2": {"name": "Standard Light A", "dng_code": 17}
+  },
+  "color_matrix_convention": "DNG XYZ_to_reference_camera; do_not_ForwardMatrix_normalize",
+  "color_matrix_d65": [
+    [1.28125, -0.484375, -0.2265625],
+    [-0.5859375, 1.59375, 0.140625],
+    [-0.046875, 0.1796875, 0.703125]
+  ],
+  "color_matrix_A": [
+    [0.8359375, -0.171875, -0.1328125],
+    [-0.46875, 1.3984375, 0.046875],
+    [-0.0859375, 0.3359375, 0.40625]
+  ],
+  "forward_matrix_raw_both_illuminants": [
+    [0.6328125, 0.109375, 0.21875],
+    [0.21875, 0.7578125, 0.0234375],
+    [-0.0390625, -0.453125, 1.3203125]
+  ],
+  "forward_matrix_normalized_d50_historical": [
+    [0.63496098, 0.10974634, 0.21949268],
+    [0.21875, 0.7578125, 0.0234375],
+    [-0.03891038, -0.45136038, 1.31517075]
+  ],
+  "cfa": "RGGB",
+  "black_level_approx": 64,
+  "white_level": 1023,
+  "interchange_space": "linear_scene_referred_XYZ_D50",
+  "adapter_policy": {
+    "physical_camera_metadata_required": true,
+    "live_neutral_required": true,
+    "color_matrix_row_normalization": false,
+    "forward_matrix_normalization": true,
+    "additional_white_balance_diagonal_after_native_transform": false,
+    "cobalt_required": false,
+    "lens_shading_part_of_color_matrix": false
+  },
+  "scope_warning": "Values are historical main-camera evidence only. Re-capture/verify on current Xiaomi 15 Ultra and independently characterize tele, super-tele and ultra-wide physical cameras."
+}
