@@ -13,6 +13,17 @@
       "size_bytes": 43912464
     }
   ],
+  "r2y_database": {
+    "recorded_descriptor_count": 315,
+    "recorded_descriptor_fields": [
+      "dependency_mask",
+      "descriptor_size",
+      "map_size",
+      "map_offset",
+      "dependency_values"
+    ],
+    "exact_binary_layout_recovered": false
+  },
   "cc0_category3": {
     "q_fraction_denominator": 512,
     "matrix_q9": [
@@ -31,9 +42,20 @@
     ],
     "fallback_identity_diagonal": 512
   },
+  "category24_ycc_matrix": {
+    "normalization_denominator": 256,
+    "signed_coefficients": [
+      [77, 150, 29],
+      [-43, -85, 128],
+      [128, -107, -21]
+    ],
+    "recorded_role": "RGB_to_YCbCr_like_integer_basis"
+  },
   "tone": {
     "entries": 1024,
     "q12_unity": 4096,
+    "luma_weights": [77, 149, 29],
+    "luma_weight_denominator": 255,
     "working_equation": "Yout ~= (Yin * Gain[Yin]) >> 12",
     "gain_ranges": {
       "-3": [4096, 4096],
