@@ -25,10 +25,11 @@ jobs:
       - name: Compile recovered Python tools
         run: |
           python -m py_compile tools/decompress_m11.py
+          python -m py_compile tools/m11_romfs_probe.py
           python -m py_compile renderer/reference/leica_m11_reference_renderer.py
           python -m py_compile renderer/reference/validate_forensics_data.py
 
-      - name: Run proprietary-free decompressor tests
+      - name: Run proprietary-free recovery tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Explain table-validation gate
