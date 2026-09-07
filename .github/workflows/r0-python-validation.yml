@@ -1,0 +1,37 @@
+name: R0 Python validation
+
+on:
+  push:
+    branches:
+      - main
+      - 'research/**'
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install reference-renderer dependency
+        run: python -m pip install --disable-pip-version-check numpy
+
+      - name: Compile recovered Python tools
+        run: |
+          python -m py_compile tools/decompress_m11.py
+          python -m py_compile renderer/reference/leica_m11_reference_renderer.py
+          python -m py_compile renderer/reference/validate_forensics_data.py
+
+      - name: Run proprietary-free decompressor tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Explain table-validation gate
+        run: |
+          echo 'The four firmware-derived table files are intentionally not fabricated in CI.'
+          echo 'validate_forensics_data.py is run once a recovered/extracted table directory is supplied.'
