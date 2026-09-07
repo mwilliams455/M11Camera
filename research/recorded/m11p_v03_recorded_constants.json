@@ -1,0 +1,94 @@
+{
+  "evidence_class": "recorded_prior_finding_not_yet_reproduced",
+  "source_firmware": "LEICA_M11-P_2.6.1.FW",
+  "original_research_date": "2026-08-21",
+  "recovery_date": "2026-09-07",
+  "romfs": [
+    {
+      "offset_hex": "0x00E3A160",
+      "size_bytes": 3629024
+    },
+    {
+      "offset_hex": "0x0333DF70",
+      "size_bytes": 43912464
+    }
+  ],
+  "cc0_category3": {
+    "q_fraction_denominator": 512,
+    "matrix_q9": [
+      [495, -58, 63],
+      [10, 601, -111],
+      [49, -255, 705]
+    ],
+    "fallback_identity_diagonal": 512
+  },
+  "cc1_category13_low_iso_candidate": {
+    "q_fraction_denominator": 512,
+    "matrix_q9": [
+      [1041, -372, -157],
+      [-117, 630, -1],
+      [-4, -78, 595]
+    ],
+    "fallback_identity_diagonal": 512
+  },
+  "tone": {
+    "entries": 1024,
+    "q12_unity": 4096,
+    "working_equation": "Yout ~= (Yin * Gain[Yin]) >> 12",
+    "gain_ranges": {
+      "-3": [4096, 4096],
+      "-2": [3004, 4348],
+      "-1": [2185, 4602],
+      "0": [1911, 4867],
+      "+1": [1365, 5290],
+      "+2": [1057, 5742],
+      "+3": [793, 6225]
+    }
+  },
+  "gamma": {
+    "input_bits": 12,
+    "output_bits": 10,
+    "coarse_nodes": 256,
+    "coarse_storage": "uint16",
+    "differential_bytes": 2048,
+    "substeps_per_group": 16,
+    "nibble_order_candidate": "high_nibble_first",
+    "comparison": {
+      "high_nibble_first": {
+        "second_difference_roughness": 1179,
+        "rms": 0.5957
+      },
+      "low_nibble_first": {
+        "second_difference_roughness": 1302,
+        "rms": 0.6153,
+        "artifact": "zero-size first-step artifacts"
+      }
+    }
+  },
+  "category42_saturation": {
+    "record_size_bytes": 44,
+    "dependency_mask_hex": "0x200",
+    "field_offsets": [6, 8],
+    "states": {
+      "-3": {"field": 357, "percent": 70},
+      "-2": {"field": 434, "percent": 85},
+      "-1": {"field": 511, "percent": 100},
+      "0": {"field": 588, "percent": 115},
+      "+1": {"field": 665, "percent": 130},
+      "+2": {"field": 741, "percent": 145},
+      "+3": {"field": 818, "percent": 160}
+    },
+    "relationship": "round(512 * percent / 100) - 1",
+    "monochrome_sentinel_state": 10,
+    "monochrome_field_value": 0
+  },
+  "dependency_masks": {
+    "saturation_hex": "0x200",
+    "contrast_hex": "0x400",
+    "sharpness_hex": "0x800"
+  },
+  "historical_packages": [
+    "M11P_color_forensics_v0.2.tar.gz",
+    "M11P_color_forensics_v0.3.tar.gz"
+  ]
+}
