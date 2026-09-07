@@ -30,9 +30,13 @@ python tools/decompress_m11.py \
 python tools/m11_romfs_probe.py \
   /tmp/LEICA_M11-P_2.6.1_unpacked.bin \
   --scan \
-  --search r2y.bin \
+  --list-files \
+  --find-file r2y.bin \
+  --extract-found-dir /tmp/m11p_extracted \
   --carve-dir /tmp/m11p_romfs
 ```
+
+The probe now walks the documented ROMFS filesystem structure. For every structured `r2y.bin` match it reports the path, file-header offset, data offset, byte size and SHA-256 before optionally extracting it. Raw `--search r2y.bin` remains available only as a secondary byte-level cross-check.
 
 Expected historical landmarks to verify:
 
