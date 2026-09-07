@@ -1,0 +1,25 @@
+# Leica firmware / unpacked proprietary binaries
+*.FW
+*.fw
+*_unpacked.bin
+firmware/private/
+
+# Private photographic validation captures
+samples/private/
+*.DNG
+*.dng
+
+# Generated renderer output
+renderer/reference/M11P_reference_renderer_v0.1/
+*.cube
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local analysis scratch
+scratch/
+.tmp/
+.DS_Store
