@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import struct
+import sys
 import unittest
 from pathlib import Path
 
@@ -10,6 +11,9 @@ MODULE_PATH = ROOT / "tools" / "m11_romfs_probe.py"
 spec = importlib.util.spec_from_file_location("m11_romfs_probe", MODULE_PATH)
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
+# dataclasses resolves postponed annotations through sys.modules during class
+# construction, so register the dynamically loaded module before exec_module.
+sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
