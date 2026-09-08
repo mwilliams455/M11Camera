@@ -6,7 +6,7 @@ on:
     branches:
       - research/m11-r0-evidence-input-space
     paths:
-      - 'tools/probe_m11_pixel_chroma.py'
+      - 'tools/probe_m11_pixel_chroma_fast.py'
       - '.github/workflows/r1-m11-pixel-chroma-probe.yml'
 
 permissions:
@@ -45,57 +45,48 @@ jobs:
             done
           done
 
-      - name: Run chroma-angle invariant probes
+      - name: Run comparative chroma-angle probes
         shell: bash
         run: |
           set -euo pipefail
           for n in 04 05 34 38; do
-            python tools/probe_m11_pixel_chroma.py \
+            python tools/probe_m11_pixel_chroma_fast.py \
               "work/m11/leica_m11_${n}.dng" \
               "work/m11/leica_m11_${n}.jpg" \
-              --out "work/results/leica_m11_${n}_pixel_chroma.json" \
-              > "work/results/leica_m11_${n}_stdout.txt"
-            python - <<PY
-          import json
-          p='work/results/leica_m11_${n}_pixel_chroma.json'
-          d=json.load(open(p))
-          m=d['chroma_angle_metrics']
-          print('${n}', 'ISO', d['iso'], 'ECC', d['alignment']['ecc'],
-                'median_abs_deg', m['absolute_angle_median_deg'],
-                'p90_abs_deg', m['absolute_angle_p90_deg'],
-                'valid', m['valid_pixel_count'])
-          PY
+              --out "work/results/leica_m11_${n}_pixel_chroma_v2.json" \
+              | tee "work/results/leica_m11_${n}_stdout.txt"
           done
 
-      - name: Summarize four-pair metrics
+      - name: Summarize route comparison
         run: |
           python - <<'PY'
           import glob, json, statistics
           rows=[]
-          for p in sorted(glob.glob('work/results/*_pixel_chroma.json')):
-              d=json.load(open(p)); m=d['chroma_angle_metrics']
-              rows.append({
-                  'file':d['dng'],'iso':d['iso'],'ecc':d['alignment']['ecc'],
-                  'median_abs_deg':m['absolute_angle_median_deg'],
-                  'mean_abs_deg':m['absolute_angle_mean_deg'],
-                  'p90_abs_deg':m['absolute_angle_p90_deg'],
-                  'valid_fraction':m['valid_fraction'],
-              })
+          for p in sorted(glob.glob('work/results/*_pixel_chroma_v2.json')):
+              d=json.load(open(p))
+              row={'file':d['dng'],'iso':d['iso'],'ecc':d['alignment']['ecc']}
+              for route,m in d['metrics'].items():
+                  row[route+'_median_abs_deg']=m['abs_median_deg']
+                  row[route+'_p90_abs_deg']=m['abs_p90_deg']
+                  row[route+'_valid_fraction']=m['fraction']
+              rows.append(row)
           summary={
-              'schema':'m11camera.r1.pixel_chroma_invariant.summary.v1',
+              'schema':'m11camera.r1.pixel_chroma_invariant.comparative.summary.v2',
               'count':len(rows),
-              'median_of_pair_medians_deg':statistics.median(r['median_abs_deg'] for r in rows),
-              'mean_of_pair_medians_deg':statistics.mean(r['median_abs_deg'] for r in rows),
+              'route_mean_pair_median_abs_deg':{
+                  route:statistics.mean(r[route+'_median_abs_deg'] for r in rows)
+                  for route in ('H0','H1','DNG')
+              },
               'pairs':rows,
           }
-          open('work/results/summary.json','w').write(json.dumps(summary,indent=2)+'\n')
+          open('work/results/summary_v2.json','w').write(json.dumps(summary,indent=2)+'\n')
           print(json.dumps(summary,indent=2))
           PY
 
       - name: Upload metrics only
         uses: actions/upload-artifact@v4
         with:
-          name: m11-r1-pixel-chroma-probe
+          name: m11-r1-pixel-chroma-probe-v2
           path: work/results/
           if-no-files-found: error
           retention-days: 7
