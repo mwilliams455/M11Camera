@@ -172,6 +172,16 @@ jobs:
           test -s "$INC/ddimusercustom.h"
           test -s "$INC/ddim_user_custom.h"
 
+          # Public change notes document these two generated R2Y register headers as
+          # renamed during the ETK refactor, while jdsr2yf2e.h still includes their
+          # original names. Alias the exact pinned replacements; do not synthesize
+          # register definitions.
+          REGINC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/MILB_Header/include/Image"
+          ln -sf fr2y6a.h "$REGINC/__fr2y6a.h"
+          ln -sf jdsr2yf2esram.h "$REGINC/__jdsr2y_f2e_sram.h"
+          test -s "$REGINC/__fr2y6a.h"
+          test -s "$REGINC/__jdsr2y_f2e_sram.h"
+
       - name: Compile target Milbeaut R2Y objects
         shell: bash
         run: |
