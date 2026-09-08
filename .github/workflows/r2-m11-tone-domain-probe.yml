@@ -7,6 +7,11 @@ on:
       - research/m11-r0-evidence-input-space
     paths:
       - 'tools/probe_m11_tone_domain_consistency.py'
+      - 'tools/probe_m11_tone_domain_icc.py'
+      - 'tools/jpeg_icc_srgb.py'
+      - 'tools/probe_m11_pixel_chroma_fast.py'
+      - 'tools/recover_m11_standard_tone_legacy_axis.py'
+      - 'research/recorded/m11_standard_tone_legacy_axis_v04.json'
       - '.github/workflows/r2-m11-tone-domain-probe.yml'
 
 permissions:
@@ -31,11 +36,20 @@ jobs:
           sudo apt-get install -y --no-install-recommends libimage-exiftool-perl libgl1
           python -m pip install --disable-pip-version-check numpy rawpy pillow opencv-python-headless
 
+      - name: Reconstruct derivative Standard tone slice
+        run: |
+          python tools/recover_m11_standard_tone_legacy_axis.py \
+            --evidence research/recorded/m11_standard_tone_legacy_axis_v04.json \
+            --out work_standard_tone_slice.json \
+            --csv work_standard_tone_slice.csv \
+            | tee work_standard_tone_slice.txt
+
       - name: Download 12 original matched M11 pairs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p work/m11 work/results
+          mv work_standard_tone_slice.* work/results/ || true
           base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
           for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
             for ext in dng jpg; do
@@ -45,20 +59,33 @@ jobs:
             done
           done
 
-      - name: Test tone coordinate and JPEG output domains
+      - name: Inspect embedded JPEG ICC profiles
         run: |
-          python tools/probe_m11_tone_domain_consistency.py \
+          exiftool -G1 -a -s \
+            -ColorSpace -ProfileDescription -ProfileCopyright -DeviceManufacturer \
+            -DeviceModel -RenderingIntent work/m11/*.jpg \
+            | tee work/results/jpeg_icc_metadata.txt
+
+      - name: Test tone coordinate and JPEG output domains after ICC conversion
+        run: |
+          python tools/probe_m11_tone_domain_icc.py \
             --dir work/m11 \
             --pairs 01 04 05 10 14 20 24 31 34 37 38 45 \
-            --out work/results/tone_domain_consistency.json \
-            | tee work/results/tone_domain_consistency.txt
+            --out work/results/tone_domain_consistency_icc.json \
+            | tee work/results/tone_domain_consistency_icc.txt
 
-      - name: Print compact decision table
+      - name: Print compact decision table and H1-linear shape
         run: |
           python - <<'PY'
           import json
-          d=json.load(open('work/results/tone_domain_consistency.json'))
+          d=json.load(open('work/results/tone_domain_consistency_icc.json'))
           print('valid pairs', d['valid_pair_count'], '/', d['pair_count'])
+          profiles={}
+          for p in d['pairs']:
+              j=p.get('jpeg',{})
+              key=(j.get('icc_profile_description'),j.get('icc_profile_sha256'))
+              profiles[key]=profiles.get(key,0)+1
+          print('profiles', profiles)
           for route in ('H0','H1'):
               for domain in ('linear','code'):
                   m=d['comparisons'][route][domain]
@@ -67,12 +94,15 @@ jobs:
                         'median_log_resid', m['scene_bin_log_abs_residual_median'],
                         'mean_log_resid', m['scene_bin_log_abs_residual_mean'],
                         'g05/g50/g95', m['pooled_gain_p05'],m['pooled_gain_p50'],m['pooled_gain_p95'])
+          print('H1 linear aggregate bins:')
+          for b in d['comparisons']['H1']['linear']['bins']:
+              print(b['bin'], b['x_mid'], b['scene_count'], b['median_gain'])
           PY
 
       - name: Upload derived metrics only
         uses: actions/upload-artifact@v4
         with:
-          name: m11-r2-tone-domain-consistency
+          name: m11-r2-tone-domain-consistency-icc
           path: work/results/
           if-no-files-found: error
           retention-days: 7
