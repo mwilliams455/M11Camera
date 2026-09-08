@@ -1,0 +1,41 @@
+{
+  "schema": "m11camera.reproduced.m11p_261_primary_hashes.v1",
+  "date": "2026-09-08",
+  "source_firmware": {
+    "size": 63621633,
+    "sha256": "0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83",
+    "body_offset_hex": "0x48",
+    "packed_size": 63621561,
+    "packed_body_md5": "c5d0e55f21fc91ea7626741e84377028",
+    "unpacked_size": 97644400,
+    "unpacked_sha256": "28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c"
+  },
+  "r2y_resource": {
+    "start_hex": "0x002C9B38",
+    "size": 53008,
+    "end_marker_hex": "0x002D6A44",
+    "path": "img/data/r2y.bin",
+    "sha256": "7a1a6440b14f086f33251a52de37d3c265132c62bf85eebad2a167ca57f01237",
+    "descriptor_count": 315
+  },
+  "sro_colour_management": {
+    "core_offset_hex": "0x002C9A98",
+    "core_size": 132,
+    "core_sha256": "70ba0cb228f51bfdede15a110c036a5bbe79ea22f51e771728d1446ac7c72e31"
+  },
+  "key_map_hashes": {
+    "cc0_category3": "31e7bc2aed47b9b3c54321210f888dc8f982d1c59ae71009dac9c9d1d6fff402",
+    "cc1_0_9999": "22823d447b5ebf42572ee82730bb5a99c3e83d5736dcabe7c236e2fa7a2ce6b6",
+    "cc1_10000_19999": "b2d1e22e72c473eef30272a65bf02661009dcdc0cf1dc14f26015ff41f302b17",
+    "cc1_20000_39999": "fc7cc561862a253e79cc300411f813f709591a41735c626c6a213afeb97ca9ae",
+    "cc1_40000_200000": "08f7bf0c739fc1d116d26766a07b39fdcac835a9f532ad5e4258af44c9e8e8d3",
+    "category24_ycc": "8378a1f64039be01f3c8a9b761da6dc270d9a458e5fedd8e407f010d1901fd56",
+    "gamma_fine_category15": "dfcedcc74c5acb282b25462bf048bba7f09e6dd75b4428707409f448f892d602",
+    "gamma_coarse_category20": "fad334bb736efc59df53cac4654b73668958e03e08c2ac3c2bf6c496ff14af56"
+  },
+  "derived_table_hashes": {
+    "tone_q12_reconstructed_curves_csv": "b142a9cfcf51e52849e5aac17c224b4de113c79a8ae809b47d8f9fd5fbef658b",
+    "gamma_4096_high_nibble_first_csv": "0738ae474494fc83299bd75ba7a4b298950fed49005b6c5693eb0f18c23cfbdc",
+    "gamma_high_nibble_first_u16le": "29051ff01ee591e954fd26d98e23c30553da180a7f9706aa137269cd0690c2a3"
+  }
+}
