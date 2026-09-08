@@ -4,7 +4,7 @@ on:
   push:
     branches: [research/m11-r0-evidence-input-space]
     paths:
-      - 'tools/infer_m11_flat_xrefs.py'
+      - 'tools/infer_m11_flat_xrefs_v2.py'
       - 'tools/decompress_m11.py'
       - '.github/workflows/r2a-m11-flat-xrefs.yml'
   workflow_dispatch:
@@ -76,13 +76,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/r2a
-          python tools/infer_m11_flat_xrefs.py /tmp/M11P.bin --output /tmp/r2a/flat_xrefs.md
-          cat /tmp/r2a/flat_xrefs.md
+          python tools/infer_m11_flat_xrefs_v2.py /tmp/M11P.bin --output /tmp/r2a/flat_xrefs_v2.md
+          cat /tmp/r2a/flat_xrefs_v2.md
 
       - name: Upload derived report only
         uses: actions/upload-artifact@v4
         with:
-          name: r2a-m11-flat-xrefs
-          path: /tmp/r2a/flat_xrefs.md
+          name: r2a-m11-flat-xrefs-v2
+          path: /tmp/r2a/flat_xrefs_v2.md
           retention-days: 14
           if-no-files-found: error
