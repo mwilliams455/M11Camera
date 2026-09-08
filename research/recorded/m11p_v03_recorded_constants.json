@@ -4,14 +4,8 @@
   "original_research_date": "2026-08-21",
   "recovery_date": "2026-09-07",
   "romfs": [
-    {
-      "offset_hex": "0x00E3A160",
-      "size_bytes": 3629024
-    },
-    {
-      "offset_hex": "0x0333DF70",
-      "size_bytes": 43912464
-    }
+    {"offset_hex": "0x00E3A160", "size_bytes": 3629024},
+    {"offset_hex": "0x0333DF70", "size_bytes": 43912464}
   ],
   "r2y_database": {
     "recorded_descriptor_count": 315,
@@ -24,6 +18,50 @@
     ],
     "exact_binary_layout_recovered": false
   },
+  "upstream_color_management_132byte_structure": {
+    "recorded_size_bytes": 132,
+    "recorded_word_count": 33,
+    "word_type": "signed_int32",
+    "pipeline_position_recorded": "sensor_or_RGB_then_white_balance_and_interpolated_color_management_before_R2Y_Category3_CC0",
+    "cm_q_denominator": 4096,
+    "cm1_recorded_temperature_k": 2850,
+    "cm2_recorded_temperature_k": 6807,
+    "cm1_q12_ints": [
+      [2358, -546, -66],
+      [-2488, 6300, 1785],
+      [-403, 797, 3504]
+    ],
+    "cm1": [
+      [0.57568359375, -0.13330078125, -0.01611328125],
+      [-0.607421875, 1.5380859375, 0.435791015625],
+      [-0.098388671875, 0.194580078125, 0.85546875]
+    ],
+    "cm2_q12_ints": [
+      [1700, -326, -200],
+      [-2354, 5409, 974],
+      [-612, 976, 2276]
+    ],
+    "cm2": [
+      [0.4150390625, -0.07958984375, -0.048828125],
+      [-0.57470703125, 1.320556640625, 0.23779296875],
+      [-0.1494140625, 0.23828125, 0.5556640625]
+    ],
+    "reciprocal_temperature_interpolation_recorded": "g=(1/T-1/T2)/(1/T1-1/T2); CM(T)=g*CM1+(1-g)*CM2",
+    "chromatic_adaptation_recorded": "Bradford-type",
+    "additional_raw_internal_matrix": [
+      [212, -165, -71],
+      [-73, 676, 85],
+      [-27, 174, 285]
+    ],
+    "additional_raw_internal_matrix_semantics": "historically called internal_CC0; exact scaling/consumer and relation to R2Y_Category3_CC0 remain unproven",
+    "genuine_m11_dng_crosscheck_2026_09_08": {
+      "cm1_exactly_matches_dng_ColorMatrix1_q12": true,
+      "cm2_exactly_matches_dng_ColorMatrix2_q12": true,
+      "dng_CalibrationIlluminant1": "Standard Light A (17)",
+      "dng_CalibrationIlluminant2": "D65 (21)",
+      "note": "The firmware-recorded numeric CM1/CM2 values match genuine LEICA M11 DNG metadata exactly; the historical firmware temperature labels 2850/6807 K remain separate recorded findings to re-extract."
+    }
+  },
   "cc0_category3": {
     "q_fraction_denominator": 512,
     "matrix_q9": [
@@ -31,16 +69,39 @@
       [10, 601, -111],
       [49, -255, 705]
     ],
-    "fallback_identity_diagonal": 512
+    "fallback_identity_diagonal": 512,
+    "dependency_evidence": "no multiple Category3 matrix records or dependency mask recovered in prior notes"
   },
-  "cc1_category13_low_iso_candidate": {
+  "cc1_category13": {
     "q_fraction_denominator": 512,
-    "matrix_q9": [
-      [1041, -372, -157],
-      [-117, 630, -1],
-      [-4, -78, 595]
-    ],
-    "fallback_identity_diagonal": 512
+    "fallback_identity_diagonal": 512,
+    "iso_dependent": true,
+    "bands_recorded": [
+      {
+        "iso_dependency_range_recorded": "<10000",
+        "matrix_q9": [
+          [1041, -372, -157],
+          [-117, 630, -1],
+          [-4, -78, 595]
+        ],
+        "matrix_complete": true
+      },
+      {
+        "iso_dependency_range_recorded": "10000-20000",
+        "first_row_q9": [910, -290, -108],
+        "matrix_complete": false
+      },
+      {
+        "iso_dependency_range_recorded": "20000-40000",
+        "first_row_q9": [806, -225, -69],
+        "matrix_complete": false
+      },
+      {
+        "iso_dependency_range_recorded": "40000-200000",
+        "first_row_q9": [715, -169, -34],
+        "matrix_complete": false
+      }
+    ]
   },
   "category24_ycc_matrix": {
     "normalization_denominator": 256,
@@ -76,10 +137,7 @@
     "substeps_per_group": 16,
     "nibble_order_candidate": "high_nibble_first",
     "comparison": {
-      "high_nibble_first": {
-        "second_difference_roughness": 1179,
-        "rms": 0.5957
-      },
+      "high_nibble_first": {"second_difference_roughness": 1179, "rms": 0.5957},
       "low_nibble_first": {
         "second_difference_roughness": 1302,
         "rms": 0.6153,
