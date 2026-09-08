@@ -1,11 +1,10 @@
-name: R2A M11 PC-relative xrefs
+name: R2A M11 relocation and ARM trace
 
 on:
   push:
     branches: [research/m11-r0-evidence-input-space]
     paths:
-      - 'tools/trace_m11_pcrel_xrefs.py'
-      - 'tools/probe_m11_section_relative_refs.py'
+      - 'tools/solve_m11_global_string_relocation.py'
       - 'tools/probe_m11_arm_region_layout.py'
       - 'tools/decompress_m11.py'
       - '.github/workflows/r2a-m11-pcrel-xrefs.yml'
@@ -70,23 +69,16 @@ jobs:
           test "$(stat -c%s /tmp/M11P.bin)" = '97644400'
           echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P.bin' | sha256sum -c -
 
-      - name: Install Capstone
-        run: python -m pip install --quiet capstone
+      - name: Install analysis dependencies
+        run: python -m pip install --quiet numpy capstone
 
-      - name: Trace relocation-independent R2Y references
+      - name: Solve whole-firmware string relocation
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/r2a
-          python tools/trace_m11_pcrel_xrefs.py /tmp/M11P.bin --output /tmp/r2a/pcrel_xrefs.md
-          cat /tmp/r2a/pcrel_xrefs.md
-
-      - name: Probe section-relative/addend references
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tools/probe_m11_section_relative_refs.py /tmp/M11P.bin --output /tmp/r2a/section_relative_refs.md
-          cat /tmp/r2a/section_relative_refs.md
+          python tools/solve_m11_global_string_relocation.py /tmp/M11P.bin --output /tmp/r2a/global_relocation.md
+          cat /tmp/r2a/global_relocation.md
 
       - name: Probe ARM text/data layout
         shell: bash
@@ -98,7 +90,7 @@ jobs:
       - name: Upload derived reports only
         uses: actions/upload-artifact@v4
         with:
-          name: r2a-m11-relocation-xrefs
+          name: r2a-m11-global-relocation-arm-layout
           path: /tmp/r2a/*.md
           retention-days: 14
           if-no-files-found: error
