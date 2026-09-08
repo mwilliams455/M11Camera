@@ -1,0 +1,82 @@
+{
+  "schema": "m11camera.forensics.manifest.v1",
+  "source_firmware": {
+    "canonical_name": "LEICA_M11-P_2.6.1.FW",
+    "size": 63621633,
+    "sha256": "0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83",
+    "body_offset": 72,
+    "packed_size": 63621561,
+    "unpacked_size": 97644400,
+    "marker": 162,
+    "packed_md5_expected": "c5d0e55f21fc91ea7626741e84377028",
+    "packed_md5_actual": "c5d0e55f21fc91ea7626741e84377028"
+  },
+  "unpacked": {
+    "size": 97644400,
+    "sha256": "28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c"
+  },
+  "romfs": [
+    {
+      "offset_abs": 14917984,
+      "offset_hex": "0x00E3A160",
+      "size": 3629024,
+      "sha256": "dc92443ded0cd6cac359ebd2f6598365bca8412313be301831b9c22773e86472"
+    },
+    {
+      "offset_abs": 53731184,
+      "offset_hex": "0x0333DF70",
+      "size": 43912464,
+      "sha256": "b2a3d8ba7d83427261f9911dce36b9de0010b1af7cc3f60b6c05c105f58580a9"
+    }
+  ],
+  "r2ys": {
+    "offset_abs": 2923320,
+    "offset_hex": "0x002C9B38",
+    "size": 53008,
+    "sha256": "7a1a6440b14f086f33251a52de37d3c265132c62bf85eebad2a167ca57f01237",
+    "end_marker_offset_abs": 2976324,
+    "end_marker_offset_hex": "0x002D6A44",
+    "descriptor_count": 315
+  },
+  "sro": {
+    "path_string_offset_abs": 2923136,
+    "path_string_offset_hex": "0x002C9A80",
+    "core_offset_abs": 2923160,
+    "core_offset_hex": "0x002C9A98",
+    "core_size": 132,
+    "leading_fill_55_bytes": 7,
+    "trailing_fill_55_bytes": 4
+  },
+  "primary_table_regions": {
+    "category13_cc1_low_iso": "0x002CD78C",
+    "category15_gamma_fine": "0x002CD838",
+    "category20_gamma_coarse": "0x002CE038",
+    "category24_ycc": "0x002CE238",
+    "category3_cc0": "0x002CE27C",
+    "category42_standard": "0x002D3150",
+    "category5_tone_config": "0x002D3200",
+    "category6_standard_tone": "0x002D4A3C"
+  },
+  "canonical_gates": {
+    "cc0_match": true,
+    "cc1_low_iso_match": true,
+    "tone_ranges_match": true,
+    "gamma_metrics_match": true,
+    "category24_ycc_match": true,
+    "category42_states_match": true,
+    "sro_dng_colormatrix_match": true
+  },
+  "derived_output_hashes": {
+    "category13_CC1_candidate.json": "7301628d67ef66e6f10e76825ddf451e28644e8dd1ce324bd35447af5b01aecb",
+    "category24_YCC.json": "6d67e6b601683477e6322d0097d8b2afcc6e015416f93152ec25e8e8ff2fe5f8",
+    "category3_CC0_candidate.json": "b3948532d23bf22c22e45d751fc2cc902c86055337a45c5a8bcb12e5202c970e",
+    "category42_saturation.json": "5869a69073a698f506b86c068261d0640b90e93da20627d9d7a7926b043c46cb",
+    "gamma_4096_high_nibble_first.csv": "0738ae474494fc83299bd75ba7a4b298950fed49005b6c5693eb0f18c23cfbdc",
+    "gamma_metadata.json": "f1a65a838b0eedf291da387897aa8aafcf8569dac89a0254a4adf770018d8256",
+    "r2y_descriptor_inventory.json": "443c47fcb7129ad94a11a7217861f2ae3af3b678f67ef5959072372881977f48",
+    "sro_colour_management.json": "1bd82548e7d64e3151f59bf05458d4216faa5c0f314d8668442eb692e43b576a",
+    "tone_q12_metadata.json": "32239cc1b0efcb70514fbfceed64dea5669b97d68027cdb6a0712d103db5a4cc",
+    "tone_q12_reconstructed_curves.csv": "b142a9cfcf51e52849e5aac17c224b4de113c79a8ae809b47d8f9fd5fbef658b"
+  },
+  "policy": "Derived tables and hashes only. Proprietary Leica updater/unpacked/resource bytes are not committed."
+}
