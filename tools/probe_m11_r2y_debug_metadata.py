@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Probe exact M11-P 2.6.1 for R2Y debug/symbol metadata remnants.
 
-The matching Milbeaut build uses GCC with -g3 -gdwarf-2.  If Leica retained
+The matching Milbeaut build uses GCC with -g3 -gdwarf-2. If Leica retained
 symbol/DWARF names or source-file references, they may bridge the known R2Y
-strings/data sections directly to ARM text addresses.  This tool emits only
+strings/data sections directly to ARM text addresses. This tool emits only
 string offsets/counts and bounded derived metadata, never firmware bytes.
 """
 from __future__ import annotations
@@ -45,7 +45,9 @@ def main():
   lines += [f'### `{label}` — `{len(hs)}` hit(s)','']
   for off in hs[:24]:
    lines.append(f'- `0x{off:08x}`')
-   for _,p,t in nearby(data,off):lines.append(f'  - `{p-off:+#x}` / `0x{p:08x}` — `{t.replace("`", "\'")}`')
+   for _,p,t in nearby(data,off):
+    safe=t.replace('`', "'")
+    lines.append(f'  - `{p-off:+#x}` / `0x{p:08x}` — `{safe}`')
   if len(hs)>24:lines.append(f'- {len(hs)-24} additional hit(s) omitted')
   lines.append('')
  lines += ['## Interpretation boundary','', 'String/source/debug markers prove metadata presence only. A function text address is not established unless a symbol/DWARF record is parsed or independently corroborated.','']
