@@ -191,6 +191,16 @@ jobs:
           ln -sf ddarm.h "$ARM_SRC/dd_arm.h"
           test -s "$ARM_SRC/dd_arm.h"
 
+          # The refactored ddtop.h includes ddtopthree/two/four before defining the
+          # GPIO enum types those sibling headers consume. The two fingerprint target
+          # translation units do not expand DD_ARM_WAIT_NS (the sole ddarm macro that
+          # needs DdTopone_UCLK40I), so this broken and semantically unrelated TOP
+          # include is removed from the compile-only compatibility copy.
+          TARGET_SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/ImageMacro/src"
+          ! grep -Eq 'DD_ARM_WAIT_NS|DdTopone_UCLK40I' "$TARGET_SRC/imr2yset.c" "$TARGET_SRC/imr2yctrl2.c"
+          grep -q '^#include "ddtop.h"' "$ARM_SRC/ddarm.h"
+          sed -i '/^#include "ddtop.h"/d' "$ARM_SRC/ddarm.h"
+
           # ddtop.h also names the refactored KChiptop headers directly. Their exact
           # pinned definitions live in MILB_Header/Project/Top/src, outside the
           # current compiler include list. Alias those exact files into the same
@@ -212,53 +222,67 @@ jobs:
           test -s "$REGINC/__fr2y6a.h"
           test -s "$REGINC/__jdsr2y_f2e_sram.h"
 
-          # imr2y.h still uses pre-refactor `union/struct io_r2y_*` tags while the
-          # exact pinned generated headers expose the same declarations as
-          # `_IoR2y*`. Resolve those tags mechanically from exact generated typedefs.
-          # This changes names only; no register layout or processing code is added.
+          # The ImageMacro snapshot mixes pre-refactor `io_r2y*` tags with exact
+          # generated `_IoR2y*` declarations. Resolve those names mechanically in
+          # only the target translation units and their shared R2Y headers. This
+          # changes identifiers only; layouts and processing logic remain untouched.
           python - <<'PY'
           import re
           from pathlib import Path
 
           root = Path('public-milbeaut/MILB_API')
-          hdr = root / 'Project/ImageMacro/src/imr2y.h'
-          text = hdr.read_text()
+          src = root / 'Project/ImageMacro/src'
+          targets = [
+              src / 'imr2y.h',
+              src / 'imr2yutils.h',
+              src / 'imr2yset.c',
+              src / 'imr2yctrl2.c',
+          ]
           generated = ''
           for p in (root / 'MILB_Header').rglob('*.h'):
               generated += '\n' + p.read_text(errors='ignore')
 
-          replacements = []
-          unresolved = []
+          maps = {}
           for kind in ('union', 'struct'):
-              old_tags = sorted(set(re.findall(r'\b' + kind + r'\s+(io_r2y_[A-Za-z0-9_]+)', text)))
-              pat = r'typedef\s+' + kind + r'\s+(_IoR2y[A-Za-z0-9_]+)\s+IoR2y[A-Za-z0-9_]+\s*;'
+              pat = r'typedef\s+' + kind + r'\s+(_IoR2y[A-Za-z0-9_]*)\s+IoR2y[A-Za-z0-9_]*\s*;'
               new_tags = sorted(set(re.findall(pat, generated)))
               by_norm = {}
               for tag in new_tags:
                   suffix = tag[len('_IoR2y'):]
                   by_norm[re.sub(r'[^a-z0-9]', '', suffix.lower())] = tag
-              for old in old_tags:
-                  suffix = old[len('io_r2y_'):]
-                  new = by_norm.get(re.sub(r'[^a-z0-9]', '', suffix.lower()))
-                  if not new:
-                      unresolved.append((kind, old))
-                      continue
-                  text = re.sub(r'\b' + kind + r'\s+' + re.escape(old) + r'\b', kind + ' ' + new, text)
-                  replacements.append((kind, old, new))
+              maps[kind] = by_norm
+
+          replacements = []
+          unresolved = []
+          for path in targets:
+              text = path.read_text()
+              for kind in ('union', 'struct'):
+                  old_tags = sorted(set(re.findall(r'\b' + kind + r'\s+(io_r2y(?:_[A-Za-z0-9_]+)?)', text)))
+                  for old in old_tags:
+                      suffix = old[len('io_r2y'):].lstrip('_')
+                      new = maps[kind].get(re.sub(r'[^a-z0-9]', '', suffix.lower()))
+                      if not new:
+                          unresolved.append((path.name, kind, old))
+                          continue
+                      text = re.sub(r'\b' + kind + r'\s+' + re.escape(old) + r'\b', kind + ' ' + new, text)
+                      replacements.append((path.name, kind, old, new))
+              path.write_text(text)
 
           if unresolved:
-              raise SystemExit('unresolved old R2Y tags: ' + ', '.join(f'{k} {t}' for k, t in unresolved))
-          hdr.write_text(text)
-          print(f'bridged {len(replacements)} exact R2Y union/struct tag(s)')
-          for kind, old, new in replacements:
-              print(f'  {kind} {old} -> {kind} {new}')
+              raise SystemExit('unresolved old R2Y tags: ' + ', '.join(f'{p}:{k} {t}' for p, k, t in unresolved))
+          print(f'bridged {len(replacements)} exact R2Y union/struct tag use(s) across target sources/headers')
+          for path, kind, old, new in replacements:
+              print(f'  {path}: {kind} {old} -> {kind} {new}')
           required = {
               ('union', 'io_r2y_ee0ctl', '_IoR2yEe0ctl'),
               ('struct', 'io_r2y_mck', '_IoR2yMck'),
               ('struct', 'io_r2y_mcl', '_IoR2yMcl'),
+              ('struct', 'io_r2y', '_IoR2y'),
+              ('struct', 'io_r2y_sram', '_IoR2ySram'),
           }
-          if not required.issubset(set(replacements)):
-              raise SystemExit('expected EE0CTL/MCK/MCL refactor bridge missing')
+          seen = {(kind, old, new) for _, kind, old, new in replacements}
+          if not required.issubset(seen):
+              raise SystemExit('expected EE0CTL/MCK/MCL/base/SRAM refactor bridge missing')
           PY
 
       - name: Compile target Milbeaut R2Y objects
