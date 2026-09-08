@@ -26,6 +26,7 @@ jobs:
         run: |
           python -m py_compile tools/decompress_m11.py
           python -m py_compile tools/m11_romfs_probe.py
+          python -m py_compile tools/extract_m11p_forensics.py
           python -m py_compile tools/probe_r2y_recorded_signatures.py
           python -m py_compile tools/probe_m11_extracted_assets.py
           python -m py_compile tools/probe_m11_corpus.py
@@ -47,4 +48,4 @@ jobs:
       - name: Explain table-validation gate
         run: |
           echo 'Firmware binaries remain ephemeral and are never committed.'
-          echo 'Derived tables are accepted only after the recorded firmware constraints reproduce.'
+          echo 'Canonical extractor outputs must reproduce research/reproduced/m11p_261_manifest.json.'
