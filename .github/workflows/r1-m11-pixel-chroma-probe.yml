@@ -15,7 +15,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,13 +31,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends libimage-exiftool-perl libgl1
           python -m pip install --disable-pip-version-check numpy rawpy pillow opencv-python-headless
 
-      - name: Download original matched pairs
+      - name: Download 12 original matched pairs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p work/m11 work/results
           base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
-          for n in 04 05 34 38; do
+          for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
             for ext in dng jpg; do
               f="leica_m11_${n}.${ext}"
               curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
@@ -45,48 +45,74 @@ jobs:
             done
           done
 
-      - name: Run comparative chroma-angle probes
+      - name: Run orientation-corrected comparative chroma probes
         shell: bash
         run: |
           set -euo pipefail
-          for n in 04 05 34 38; do
+          for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
             python tools/probe_m11_pixel_chroma_fast.py \
               "work/m11/leica_m11_${n}.dng" \
               "work/m11/leica_m11_${n}.jpg" \
-              --out "work/results/leica_m11_${n}_pixel_chroma_v2.json" \
+              --out "work/results/leica_m11_${n}_pixel_chroma_v3.json" \
               | tee "work/results/leica_m11_${n}_stdout.txt"
           done
 
-      - name: Summarize route comparison
+      - name: Summarize valid route comparisons
         run: |
           python - <<'PY'
           import glob, json, statistics
           rows=[]
-          for p in sorted(glob.glob('work/results/*_pixel_chroma_v2.json')):
+          for p in sorted(glob.glob('work/results/*_pixel_chroma_v3.json')):
               d=json.load(open(p))
-              row={'file':d['dng'],'iso':d['iso'],'ecc':d['alignment']['ecc']}
+              row={
+                  'file':d['dng'],'iso':d['iso'],
+                  'ecc':d['alignment']['ecc'],
+                  'alignment_valid':d['alignment']['valid'],
+                  'dng_orientation':d.get('dng_orientation'),
+                  'rawpy_flip':d['raw'].get('rawpy_orientation_flip'),
+                  'jpeg_orientation':d['jpeg'].get('jpeg_exif_orientation'),
+              }
               for route,m in d['metrics'].items():
                   row[route+'_median_abs_deg']=m['abs_median_deg']
+                  row[route+'_signed_median_deg']=m['signed_median_deg']
                   row[route+'_p90_abs_deg']=m['abs_p90_deg']
                   row[route+'_valid_fraction']=m['fraction']
               rows.append(row)
+          valid=[r for r in rows if r['alignment_valid'] and 'H1_median_abs_deg' in r]
+          invalid=[r for r in rows if not r['alignment_valid']]
           summary={
-              'schema':'m11camera.r1.pixel_chroma_invariant.comparative.summary.v2',
-              'count':len(rows),
-              'route_mean_pair_median_abs_deg':{
-                  route:statistics.mean(r[route+'_median_abs_deg'] for r in rows)
+              'schema':'m11camera.r1.pixel_chroma_invariant.comparative.summary.v3',
+              'pair_count':len(rows),
+              'valid_alignment_count':len(valid),
+              'invalid_alignment_count':len(invalid),
+              'valid_route_mean_pair_median_abs_deg':{
+                  route:statistics.mean(r[route+'_median_abs_deg'] for r in valid)
                   for route in ('H0','H1','DNG')
-              },
+              } if valid else {},
+              'valid_route_median_pair_median_abs_deg':{
+                  route:statistics.median(r[route+'_median_abs_deg'] for r in valid)
+                  for route in ('H0','H1','DNG')
+              } if valid else {},
+              'valid_route_mean_signed_median_deg':{
+                  route:statistics.mean(r[route+'_signed_median_deg'] for r in valid)
+                  for route in ('H0','H1','DNG')
+              } if valid else {},
+              'h1_beats_h0_count':sum(
+                  r['H1_median_abs_deg'] < r['H0_median_abs_deg'] for r in valid
+              ),
+              'h1_beats_dng_count':sum(
+                  r['H1_median_abs_deg'] < r['DNG_median_abs_deg'] for r in valid
+              ),
               'pairs':rows,
           }
-          open('work/results/summary_v2.json','w').write(json.dumps(summary,indent=2)+'\n')
+          open('work/results/summary_v3.json','w').write(json.dumps(summary,indent=2)+'\n')
           print(json.dumps(summary,indent=2))
           PY
 
       - name: Upload metrics only
         uses: actions/upload-artifact@v4
         with:
-          name: m11-r1-pixel-chroma-probe-v2
+          name: m11-r1-pixel-chroma-probe-v3
           path: work/results/
           if-no-files-found: error
           retention-days: 7
