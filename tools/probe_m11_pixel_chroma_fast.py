@@ -30,6 +30,7 @@ import rawpy
 from PIL import Image, ImageOps
 
 WORK_LONG = 1400
+ALIGNMENT_ECC_MIN = 0.80
 CC0 = np.array([[495,-58,63],[10,601,-111],[49,-255,705]], np.float64)/512.0
 CC1 = np.array([[1041,-372,-157],[-117,630,-1],[-4,-78,595]], np.float64)/512.0
 CC = CC1 @ CC0
@@ -87,7 +88,7 @@ def parse_nums(v):
 
 
 def metadata(dng):
-    raw=subprocess.check_output(['exiftool','-json','-G1','-a','-u','-n','-ColorMatrix1','-ColorMatrix2','-AsShotNeutral','-ISO','-ColorSpace',str(dng)],text=True)
+    raw=subprocess.check_output(['exiftool','-json','-G1','-a','-u','-n','-ColorMatrix1','-ColorMatrix2','-AsShotNeutral','-ISO','-ColorSpace','-Orientation',str(dng)],text=True)
     r=json.loads(raw)[0]
     def get(name,required=True):
         for k,v in r.items():
@@ -100,6 +101,7 @@ def metadata(dng):
         'neutral':parse_nums(get('AsShotNeutral')),
         'iso':float(get('ISO')),
         'jpeg_color_space_tag':get('ColorSpace',False),
+        'dng_orientation':get('Orientation',False),
     }
 
 
@@ -146,15 +148,18 @@ def read_camera_rgb(dng):
             'color_desc': bytes(raw.color_desc).decode('ascii','replace'),
             'black_level_per_channel':[float(x) for x in raw.black_level_per_channel],
             'white_level':float(raw.white_level),
+            'rawpy_orientation_flip':int(raw.sizes.flip),
         }
+        # Do not override user_flip. rawpy/LibRaw's default honors the RAW image
+        # orientation, matching ImageOps.exif_transpose() on the corresponding JPEG.
         rgb16=raw.postprocess(
             demosaic_algorithm=rawpy.DemosaicAlgorithm.LINEAR,
             half_size=True,
             use_camera_wb=False,use_auto_wb=False,user_wb=[1.,1.,1.,1.],
             no_auto_bright=True,output_color=rawpy.ColorSpace.raw,
-            gamma=(1.,1.),output_bps=16,user_flip=0,
+            gamma=(1.,1.),output_bps=16,
         )
-        diag['rawpy_half_shape']=list(rgb16.shape)
+        diag['rawpy_half_shape_oriented']=list(rgb16.shape)
     small=resize_array_long(rgb16,WORK_LONG)
     diag['working_shape']=list(small.shape)
     return small.astype(np.float32)*(1.0/65535.0),diag
@@ -166,11 +171,18 @@ def srgb_decode(x):
 
 
 def read_jpeg(jpg):
-    im=ImageOps.exif_transpose(Image.open(jpg)).convert('RGB')
+    src=Image.open(jpg)
+    exif_orientation=src.getexif().get(274)
+    im=ImageOps.exif_transpose(src).convert('RGB')
     native=(im.height,im.width,3)
     im.thumbnail((WORK_LONG,WORK_LONG),Image.Resampling.LANCZOS)
     a=np.asarray(im,np.float32)*(1.0/255.0)
-    return srgb_decode(a),{'jpeg_native_shape':list(native),'working_shape':list(a.shape),'icc_profile_present':bool(im.info.get('icc_profile'))}
+    return srgb_decode(a),{
+        'jpeg_native_shape_oriented':list(native),
+        'working_shape':list(a.shape),
+        'icc_profile_present':bool(src.info.get('icc_profile')),
+        'jpeg_exif_orientation':exif_orientation,
+    }
 
 
 def apply(img,m):
@@ -194,7 +206,8 @@ def align(reference_jpg,candidate_h1):
     except cv2.error:
         ecc=float('nan')
     aligned=cv2.warpAffine(c,warp,(w,h),flags=cv2.INTER_LINEAR|cv2.WARP_INVERSE_MAP,borderMode=cv2.BORDER_CONSTANT,borderValue=0)
-    return aligned,warp,float(ecc)
+    valid=bool(np.isfinite(ecc) and ecc>=ALIGNMENT_ECC_MIN)
+    return aligned,warp,float(ecc),valid
 
 
 def warp_same(candidate,target_shape,warp):
@@ -233,20 +246,25 @@ def main():
     meta=metadata(a.dng); mats,bridge=route_matrices(meta)
     raw,rawdiag=read_camera_rgb(a.dng); jpg,jdiag=read_jpeg(a.jpg)
     routed={k:apply(raw,m) for k,m in mats.items()}
-    h1_aligned,warp,ecc=align(jpg,routed['H1'])
+    h1_aligned,warp,ecc,alignment_valid=align(jpg,routed['H1'])
     aligned={'H1':h1_aligned}
     for k in ('H0','DNG'): aligned[k]=warp_same(routed[k],jpg.shape,warp)
-    metrics={k:angle_metrics(v,jpg) for k,v in aligned.items()}
+    metrics={k:angle_metrics(v,jpg) for k,v in aligned.items()} if alignment_valid else {}
     out={
-        'schema':'m11camera.r1.pixel_chroma_invariant.comparative.v2',
-        'dng':a.dng.name,'jpg':a.jpg.name,'iso':meta['iso'],'jpeg_color_space_tag':meta['jpeg_color_space_tag'],
+        'schema':'m11camera.r1.pixel_chroma_invariant.comparative.v3',
+        'dng':a.dng.name,'jpg':a.jpg.name,'iso':meta['iso'],
+        'jpeg_color_space_tag':meta['jpeg_color_space_tag'],
+        'dng_orientation':meta['dng_orientation'],
         'raw':rawdiag,'jpeg':jdiag,'bridge':bridge,
-        'alignment':{'ecc':ecc,'warp':warp.tolist()},
+        'alignment':{
+            'ecc':ecc,'valid':alignment_valid,'minimum_ecc':ALIGNMENT_ECC_MIN,
+            'warp':warp.tolist(),
+        },
         'route_matrices':{k:v.tolist() for k,v in mats.items()},
         'metrics':metrics,
         'invariant':'atan2(Cr,Cb) after linearized JPEG; invariant to RGB-scalar tone, Y-only gamma, symmetric chroma scale',
     }
     a.out.parent.mkdir(parents=True,exist_ok=True); a.out.write_text(json.dumps(out,indent=2)+'\n')
-    print(json.dumps({'iso':meta['iso'],'ecc':ecc,'metrics':metrics},indent=2))
+    print(json.dumps({'iso':meta['iso'],'alignment':out['alignment'],'metrics':metrics},indent=2))
 
 if __name__=='__main__': main()
