@@ -30,6 +30,12 @@ jobs:
           python -m py_compile tools/probe_m11_extracted_assets.py
           python -m py_compile tools/probe_m11_corpus.py
           python -m py_compile tools/probe_m11_pixel_chroma_fast.py
+          python -m py_compile tools/probe_m11_pixel_chroma_icc.py
+          python -m py_compile tools/probe_m11_tone_domain_consistency.py
+          python -m py_compile tools/probe_m11_tone_domain_icc.py
+          python -m py_compile tools/probe_m11_gamma_domain_hue_luma.py
+          python -m py_compile tools/jpeg_icc_srgb.py
+          python -m py_compile tools/recover_m11_standard_tone_legacy_axis.py
           python -m py_compile renderer/reference/leica_m11_reference_renderer.py
           python -m py_compile renderer/reference/validate_forensics_data.py
           python -m py_compile renderer/source_adapter/dng_dual_illuminant.py
