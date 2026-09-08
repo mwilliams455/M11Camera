@@ -1,0 +1,98 @@
+name: R2A M11 selector region trace
+
+on:
+  push:
+    branches:
+      - research/m11-r0-evidence-input-space
+    paths:
+      - 'tools/trace_m11_selector_regions.py'
+      - 'tools/decompress_m11.py'
+      - '.github/workflows/r2a-m11-selector-region-trace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download hash-gated Leica M11-P 2.6.1 firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/154.0 Safari/537.36'
+          leica_referer='https://leica-camera.com/en-GB/photography/cameras/m/m11-p-black/downloads'
+          expected_size='63621633'
+          expected_sha='0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83'
+          try_url() {
+            local url="$1"; local referer="$2"
+            rm -f /tmp/LEICA_M11-P_2.6.1.FW
+            if ! curl --http1.1 -L --fail --retry 1 --retry-all-errors --retry-delay 1 -A "$ua" -e "$referer" -H 'Accept: application/octet-stream,*/*;q=0.8' -o /tmp/LEICA_M11-P_2.6.1.FW "$url"; then return 1; fi
+            [ "$(stat -c%s /tmp/LEICA_M11-P_2.6.1.FW)" = "$expected_size" ] || return 1
+            [ "$(sha256sum /tmp/LEICA_M11-P_2.6.1.FW | awk '{print $1}')" = "$expected_sha" ] || return 1
+          }
+          verified=0
+          for url in \
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW' \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1' \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'; do
+            if try_url "$url" "$leica_referer"; then verified=1; break; fi
+          done
+          if [ "$verified" = 0 ]; then
+            tld_popup='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+            curl --http1.1 -L --fail -A "$ua" -o /tmp/tld_download.html "$tld_popup"
+            python - <<'PY' >/tmp/tld_urls.txt
+          from html import unescape
+          from pathlib import Path
+          from urllib.parse import urljoin
+          import re
+          base='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+          text=Path('/tmp/tld_download.html').read_text(errors='replace')
+          out=[]
+          for raw in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''', text, re.I):
+              u=urljoin(base,unescape(raw)); low=u.lower()
+              if ('fichiers.touslesdrivers.com' in low or 'leica-camera.com' in low) and ('84657' in low or '.fw' in low) and u not in out: out.append(u)
+          for raw in re.findall(r'''https?://[^\s"'<>]+''', text, re.I):
+              u=unescape(raw).replace('\\/','/'); low=u.lower()
+              if ('fichiers.touslesdrivers.com' in low or 'leica-camera.com' in low) and ('84657' in low or '.fw' in low) and u not in out: out.append(u)
+          print('\n'.join(out))
+          PY
+            while IFS= read -r url; do
+              [ -n "$url" ] || continue
+              if try_url "$url" "$tld_popup"; then verified=1; break; fi
+            done </tmp/tld_urls.txt
+          fi
+          [ "$verified" = 1 ]
+          echo "$expected_sha  /tmp/LEICA_M11-P_2.6.1.FW" | sha256sum -c -
+
+      - name: Decompress and verify exact image
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/decompress_m11.py /tmp/LEICA_M11-P_2.6.1.FW -o /tmp/M11P_2.6.1_unpacked.bin
+          test "$(stat -c%s /tmp/M11P_2.6.1_unpacked.bin)" = '97644400'
+          echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P_2.6.1_unpacked.bin' | sha256sum -c -
+
+      - name: Install derived disassembly helper
+        run: python -m pip install --quiet capstone
+
+      - name: Trace selector and driver regions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/r2a
+          python tools/trace_m11_selector_regions.py /tmp/M11P_2.6.1_unpacked.bin --output /tmp/r2a/selector_region_trace.md
+          cat /tmp/r2a/selector_region_trace.md
+
+      - name: Upload derived report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-selector-region-trace
+          path: /tmp/r2a/selector_region_trace.md
+          if-no-files-found: error
+          retention-days: 14
