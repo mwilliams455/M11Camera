@@ -75,12 +75,24 @@ def build_file_owners(data: bytes) -> tuple[list[FileOwner], list[str]]:
     owners: list[FileOwner] = []
     notes: list[str] = []
     for romfs_index, (romfs_base, recorded_size) in enumerate(RECORDED_LANDMARKS, start=1):
-        info = parse_romfs(data, romfs_base, recorded_size)
-        romfs = data[romfs_base : romfs_base + info.declared_size]
-        entries = walk_romfs(romfs, info.root_header_rel)
+        try:
+            info = parse_romfs(data, romfs_base, recorded_size)
+            romfs = data[romfs_base : romfs_base + info.declared_size]
+            entries = walk_romfs(
+                romfs,
+                info.root_header_rel,
+                allow_duplicate_headers=True,
+            )
+        except ValueError as exc:
+            notes.append(
+                f"ROMFS {romfs_index}: base=0x{romfs_base:08x}, owner walk skipped after parse error: {exc}"
+            )
+            continue
+
         notes.append(
             f"ROMFS {romfs_index}: base=0x{romfs_base:08x}, "
-            f"declared={info.declared_size}, entries={len(entries)}, volume={info.volume_name!r}"
+            f"declared={info.declared_size}, entries={len(entries)}, volume={info.volume_name!r}; "
+            "duplicate header references tolerated for ownership scan"
         )
         for entry in entries:
             if entry.type_id != 2:
