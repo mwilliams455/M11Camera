@@ -1,0 +1,83 @@
+name: R1 M11 matched corpus probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/m11-r0-evidence-input-space
+    paths:
+      - 'tools/probe_m11_corpus.py'
+      - '.github/workflows/r1-m11-corpus-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libimage-exiftool-perl
+          python -m pip install --disable-pip-version-check numpy
+
+      - name: Download selected original Photography Blog pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/m11
+          base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
+          for n in 04 05 34 38; do
+            for ext in dng jpg; do
+              f="leica_m11_${n}.${ext}"
+              echo "Downloading $f"
+              curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
+                "$base/$f" -o "work/m11/$f"
+            done
+          done
+
+      - name: Hash source pairs
+        run: |
+          cd work/m11
+          sha256sum leica_m11_* > sha256sums.txt
+          cat sha256sums.txt
+
+      - name: Dump complete ExifTool metadata
+        run: |
+          exiftool -json -G1 -a -u -n work/m11/leica_m11_* > work/m11/exiftool_all.json
+          exiftool -G1 -a -u -n \
+            -Make -Model -Software -ISO -ExposureTime -FNumber \
+            -BlackLevel -WhiteLevel -CalibrationIlluminant1 -CalibrationIlluminant2 \
+            -CameraCalibration1 -CameraCalibration2 -ColorMatrix1 -ColorMatrix2 \
+            -ForwardMatrix1 -ForwardMatrix2 -AsShotNeutral \
+            -ProfileName -ProfileLookTableDims -ProfileLookTableData \
+            work/m11/*.dng | tee work/m11/key_metadata.txt
+
+      - name: Run M11 input-space hypothesis probe
+        run: |
+          python tools/probe_m11_corpus.py \
+            --exif work/m11/exiftool_all.json \
+            --out work/m11/m11_metadata_probe.json | tee work/m11/probe_stdout.txt
+
+      - name: Upload forensic results only
+        uses: actions/upload-artifact@v4
+        with:
+          name: m11-r1-matched-corpus-probe
+          path: |
+            work/m11/sha256sums.txt
+            work/m11/exiftool_all.json
+            work/m11/key_metadata.txt
+            work/m11/m11_metadata_probe.json
+            work/m11/probe_stdout.txt
+          if-no-files-found: error
+          retention-days: 7
