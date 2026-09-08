@@ -1,0 +1,101 @@
+name: R1 M11 pixel chroma probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/m11-r0-evidence-input-space
+    paths:
+      - 'tools/probe_m11_pixel_chroma.py'
+      - '.github/workflows/r1-m11-pixel-chroma-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libimage-exiftool-perl libgl1
+          python -m pip install --disable-pip-version-check numpy rawpy pillow opencv-python-headless
+
+      - name: Download original matched pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/m11 work/results
+          base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
+          for n in 04 05 34 38; do
+            for ext in dng jpg; do
+              f="leica_m11_${n}.${ext}"
+              curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
+                "$base/$f" -o "work/m11/$f"
+            done
+          done
+
+      - name: Run chroma-angle invariant probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in 04 05 34 38; do
+            python tools/probe_m11_pixel_chroma.py \
+              "work/m11/leica_m11_${n}.dng" \
+              "work/m11/leica_m11_${n}.jpg" \
+              --out "work/results/leica_m11_${n}_pixel_chroma.json" \
+              > "work/results/leica_m11_${n}_stdout.txt"
+            python - <<PY
+          import json
+          p='work/results/leica_m11_${n}_pixel_chroma.json'
+          d=json.load(open(p))
+          m=d['chroma_angle_metrics']
+          print('${n}', 'ISO', d['iso'], 'ECC', d['alignment']['ecc'],
+                'median_abs_deg', m['absolute_angle_median_deg'],
+                'p90_abs_deg', m['absolute_angle_p90_deg'],
+                'valid', m['valid_pixel_count'])
+          PY
+          done
+
+      - name: Summarize four-pair metrics
+        run: |
+          python - <<'PY'
+          import glob, json, statistics
+          rows=[]
+          for p in sorted(glob.glob('work/results/*_pixel_chroma.json')):
+              d=json.load(open(p)); m=d['chroma_angle_metrics']
+              rows.append({
+                  'file':d['dng'],'iso':d['iso'],'ecc':d['alignment']['ecc'],
+                  'median_abs_deg':m['absolute_angle_median_deg'],
+                  'mean_abs_deg':m['absolute_angle_mean_deg'],
+                  'p90_abs_deg':m['absolute_angle_p90_deg'],
+                  'valid_fraction':m['valid_fraction'],
+              })
+          summary={
+              'schema':'m11camera.r1.pixel_chroma_invariant.summary.v1',
+              'count':len(rows),
+              'median_of_pair_medians_deg':statistics.median(r['median_abs_deg'] for r in rows),
+              'mean_of_pair_medians_deg':statistics.mean(r['median_abs_deg'] for r in rows),
+              'pairs':rows,
+          }
+          open('work/results/summary.json','w').write(json.dumps(summary,indent=2)+'\n')
+          print(json.dumps(summary,indent=2))
+          PY
+
+      - name: Upload metrics only
+        uses: actions/upload-artifact@v4
+        with:
+          name: m11-r1-pixel-chroma-probe
+          path: work/results/
+          if-no-files-found: error
+          retention-days: 7
