@@ -7,6 +7,7 @@ on:
     paths:
       - 'tools/trace_m11_gamma_consumers.py'
       - 'tools/trace_m11_gamma_a32_xrefs.py'
+      - 'tools/trace_m11_gamma_a32_refined.py'
       - 'tools/summarize_m11p_open_categories.py'
       - 'tools/decompress_m11.py'
       - 'tools/m11_romfs_probe.py'
@@ -156,6 +157,15 @@ jobs:
             --output /tmp/r2a/gamma_a32_xrefs.md
           cat /tmp/r2a/gamma_a32_xrefs.md
 
+      - name: Refine A32 xrefs by shared logger call
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/trace_m11_gamma_a32_refined.py \
+            /tmp/M11P_2.6.1_unpacked.bin \
+            --output /tmp/r2a/gamma_a32_refined.md
+          cat /tmp/r2a/gamma_a32_refined.md
+
       - name: Upload derived R2A reports only
         uses: actions/upload-artifact@v4
         with:
@@ -163,6 +173,7 @@ jobs:
           path: |
             /tmp/r2a/gamma_consumer_trace.md
             /tmp/r2a/gamma_a32_xrefs.md
+            /tmp/r2a/gamma_a32_refined.md
             /tmp/r2a/open_categories.json
             /tmp/r2a/open_categories.md
           if-no-files-found: error
