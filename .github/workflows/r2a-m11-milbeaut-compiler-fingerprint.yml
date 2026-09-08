@@ -101,9 +101,9 @@ jobs:
         run: |
           set -euo pipefail
           # MILB_API/include/klib.h refers outside the pinned repository to
-          # ../../../fj/klib/src/kobject.h.  Recreate only the primitive ETK
+          # ../../../fj/klib/src/kobject.h. Recreate only primitive ETK
           # declarations needed to compile the unmodified ImageMacro units.
-          # The target gamma routines do not use object-private state, and the
+          # Target gamma routines do not use object-private state, and the
           # matcher masks relocations/link-sensitive branch words.
           SHIM="$GITHUB_WORKSPACE/fj/klib/src/kobject.h"
           mkdir -p "$(dirname "$SHIM")"
@@ -158,15 +158,19 @@ jobs:
           test -s "$SHIM"
           test "$(realpath "$GITHUB_WORKSPACE/public-milbeaut/MILB_API/include/../../../fj/klib/src/kobject.h")" = "$SHIM"
 
-          # The refactored public tree also contains the expected Socionext headers
-          # under inconsistent filenames/locations.  Link those exact pinned files
-          # into the names expected by the ImageMacro sources rather than replacing
-          # their contents with local guesses.
+          # The refactored public tree contains the expected Socionext headers under
+          # inconsistent filenames/locations. Link exact pinned files into the names
+          # expected by ImageMacro, then repair only obvious mechanical refactor
+          # defects in the compatibility copy (no R2Y processing code is changed).
           INC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/include"
-          ln -sf ../Project/DeviceDriver/ARM/src/ddimtypedef.h "$INC/ddim_typedef.h"
-          ln -sf ../Project/PalladiumTest/src/ddimusercustom.h "$INC/ddimusercustom.h"
+          cp "$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/DeviceDriver/ARM/src/ddimtypedef.h" "$INC/ddim_typedef.h"
+          cp "$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/PalladiumTest/src/ddimusercustom.h" "$INC/ddimusercustom.h"
+          sed -i 's/(DdimUserCustom \*self,VOID)/(DdimUserCustom *self)/g' "$INC/ddimusercustom.h"
+          sed -i '/#endif[[:space:]]*\/\/[[:space:]]*_DDIM_USER_CUSTOM_H_/d' "$INC/ddimusercustom.h"
+          ln -sf ddimusercustom.h "$INC/ddim_user_custom.h"
           test -s "$INC/ddim_typedef.h"
           test -s "$INC/ddimusercustom.h"
+          test -s "$INC/ddim_user_custom.h"
 
       - name: Compile target Milbeaut R2Y objects
         shell: bash
@@ -180,8 +184,8 @@ jobs:
           make GNUarm="$PREFIX" ENABLE_NEON=y PRIORITY_OPTION=fast \
             obj/imr2yset.o obj/imr2yctrl2.o
 
-          # The public make rules prefix compile recipes with '-', so a compiler error
-          # can otherwise be ignored. Missing/empty target objects are fatal here.
+          # Public make rules prefix compile recipes with '-', so compiler errors can
+          # otherwise be ignored. Missing/empty target objects are fatal here.
           for o in obj/imr2yset.o obj/imr2yctrl2.o; do
             test -s "$o" || { echo "ERROR: target object not produced: $o" >&2; exit 1; }
             "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
