@@ -119,6 +119,8 @@ jobs:
           typedef unsigned int kuint32;
           typedef signed long long kint64;
           typedef unsigned long long kuint64;
+          typedef signed long klong;
+          typedef unsigned long kulong;
           typedef void VOID;
           typedef char CHAR;
           typedef unsigned char UCHAR;
@@ -203,7 +205,7 @@ jobs:
           set -e
           {
             echo "make_rc=$MAKE_RC"
-            echo "compiler=$($PREFIX\gcc --version | head -n1)"
+            echo "compiler=$(${PREFIX}gcc --version | head -n1)"
             echo
             grep -E -m 80 'fatal error:|(^|[[:space:]])error:|undefined reference|No such file or directory' /tmp/r2a/compile.log || true
           } > /tmp/r2a/compile-errors.txt
