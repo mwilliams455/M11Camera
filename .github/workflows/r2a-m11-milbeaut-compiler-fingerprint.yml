@@ -19,6 +19,17 @@ jobs:
       - name: Checkout M11 research
         uses: actions/checkout@v4
 
+      - name: Checkout exact public Milbeaut source sparsely
+        uses: actions/checkout@v4
+        with:
+          repository: ZMlogicL/companyTask
+          ref: f5fc84bd5c475f4c15017b7bff749f81c3618287
+          path: public-milbeaut
+          fetch-depth: 1
+          sparse-checkout: |
+            MILB_API
+          sparse-checkout-cone-mode: true
+
       - name: Acquire exact hash-gated M11-P updater
         shell: bash
         run: |
@@ -68,14 +79,6 @@ jobs:
           test "$(stat -c%s /tmp/M11P.bin)" = '97644400'
           echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P.bin' | sha256sum -c -
 
-      - name: Clone matching public Milbeaut source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --filter=blob:none --no-checkout https://github.com/ZMlogicL/companyTask.git /tmp/companyTask
-          git -C /tmp/companyTask checkout f5fc84bd5c475f4c15017b7bff749f81c3618287 -- MILB_API
-          test -f /tmp/companyTask/MILB_API/Project/ImageMacro/src/imr2yset.c
-
       - name: Install exact ARM Embedded GCC 4.9 Q3 toolchain
         shell: bash
         run: |
@@ -91,7 +94,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd /tmp/companyTask/MILB_API/Project/ImageMacro
+          SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/ImageMacro"
+          cd "$SRC"
           rm -rf obj dep asm
           mkdir -p obj dep asm
           PREFIX=/tmp/gcc-arm/bin/arm-none-eabi-
@@ -111,10 +115,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/r2a
+          SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/ImageMacro/obj"
           python tools/match_milbeaut_object_fingerprints.py \
             /tmp/M11P.bin \
-            /tmp/companyTask/MILB_API/Project/ImageMacro/obj/imr2yset.o \
-            /tmp/companyTask/MILB_API/Project/ImageMacro/obj/imr2yctrl2.o \
+            "$SRC/imr2yset.o" \
+            "$SRC/imr2yctrl2.o" \
             --output /tmp/r2a/milbeaut_object_fingerprints.md
           cat /tmp/r2a/milbeaut_object_fingerprints.md
           cp /tmp/gcc-version.txt /tmp/r2a/gcc-version.txt
