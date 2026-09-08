@@ -1,0 +1,90 @@
+name: R2 M11 gamma domain probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/m11-r0-evidence-input-space
+    paths:
+      - 'tools/probe_m11_gamma_domain_hue_luma.py'
+      - 'tools/probe_m11_pixel_chroma_fast.py'
+      - 'tools/jpeg_icc_srgb.py'
+      - '.github/workflows/r2-m11-gamma-domain-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libimage-exiftool-perl libgl1
+          python -m pip install --disable-pip-version-check numpy rawpy pillow opencv-python-headless
+
+      - name: Download 12 original matched M11 pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/m11 work/results
+          base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
+          for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
+            for ext in dng jpg; do
+              f="leica_m11_${n}.${ext}"
+              curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
+                "$base/$f" -o "work/m11/$f"
+            done
+          done
+
+      - name: Run hue-vs-luma gamma-domain diagnostic
+        run: |
+          python tools/probe_m11_gamma_domain_hue_luma.py \
+            --dir work/m11 \
+            --pairs 01 04 05 10 14 20 24 31 34 37 38 45 \
+            --out work/results/gamma_domain_hue_luma.json \
+            | tee work/results/gamma_domain_hue_luma.txt
+
+      - name: Print compact decision table
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('work/results/gamma_domain_hue_luma.json'))
+          print('valid pairs', d['valid_pair_count'], '/', d['pair_count'])
+          print('H1 code/linear positive-control ratio', d['h1_code_to_linear_median_slope_ratio'])
+          for route in ('H0','H1','DNG'):
+              for domain in ('linear','code'):
+                  a=d['aggregate'][route][domain]
+                  print(route, domain,
+                        'pairs', a.get('pair_count'),
+                        'median_pair_med_abs_slope_deg_per_stop', a.get('median_of_pair_median_abs_slopes_deg_per_stop'),
+                        'median_pair_p90_abs_slope_deg_per_stop', a.get('median_of_pair_p90_abs_slopes_deg_per_stop'),
+                        'median_pair_residual_span_deg', a.get('median_of_pair_median_residual_spans_deg'))
+          print('\nH1 linear per-pair:')
+          for p in d['pairs']:
+              if not p['alignment']['valid']: continue
+              s=p['routes']['H1']['linear']['summary']
+              print(p['stem'], 'ISO', p['iso'], 'cells', s.get('cell_count'),
+                    'med|slope|', s.get('median_abs_slope_deg_per_stop'),
+                    'p90|slope|', s.get('p90_abs_slope_deg_per_stop'),
+                    'med span', s.get('median_residual_span_deg'))
+          PY
+
+      - name: Upload derived metrics only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m11-r2-gamma-domain-hue-luma
+          path: work/results/
+          if-no-files-found: warn
+          retention-days: 7
