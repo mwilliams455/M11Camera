@@ -9,6 +9,7 @@ on:
       - 'tools/decompress_m11.py'
       - 'tools/m11_romfs_probe.py'
       - 'tools/probe_r2y_recorded_signatures.py'
+      - 'tools/probe_m11_extracted_assets.py'
       - '.github/workflows/r0-official-firmware-probe.yml'
 
 permissions:
@@ -17,7 +18,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,18 +27,55 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p work/fw work/extracted work/results
-          url='https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
-          referer='https://leica-camera.com/en-GB/photography/cameras/m/m11-p-black/downloads'
+          mkdir -p work/fw work/extracted work/results work/derived
+          referer='https://leica-camera.com/en-int/photography/cameras/m/m11-p-safari/downloads'
           ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
-          curl --http1.1 -fL --retry 5 --retry-all-errors --retry-delay 3 \
-            --connect-timeout 30 --max-time 180 \
-            -A "$ua" -e "$referer" \
-            -H 'Accept: application/octet-stream,application/*;q=0.9,*/*;q=0.8' \
-            -H 'Accept-Language: en-GB,en;q=0.9' \
-            "$url" -o work/fw/LEICA_M11-P_2.6.1.FW
-          stat -c 'firmware_size=%s' work/fw/LEICA_M11-P_2.6.1.FW | tee work/results/source_size.txt
-          sha256sum work/fw/LEICA_M11-P_2.6.1.FW | tee work/results/source_sha256.txt
+          out='work/fw/LEICA_M11-P_2.6.1.FW'
+
+          # Leica's current downloads page resolves its Firmware 2.6.1 button to
+          # /sites/default/files/LEICA_M11-P_2.6.1.FW.  Try only Leica-owned URL
+          # variants here; no mirror is silently substituted for the evidence source.
+          urls=(
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'
+          )
+
+          : > work/results/download_attempts.txt
+          success=0
+          for url in "${urls[@]}"; do
+            echo "TRY $url" | tee -a work/results/download_attempts.txt
+            rm -f "$out"
+            if curl --http1.1 -fL --retry 6 --retry-all-errors --retry-delay 4 \
+              --connect-timeout 30 --max-time 300 \
+              -A "$ua" -e "$referer" \
+              -H 'Accept: application/octet-stream,application/*;q=0.9,*/*;q=0.8' \
+              -H 'Accept-Language: en-GB,en;q=0.9' \
+              -H 'Cache-Control: no-cache' \
+              "$url" -o "$out" 2>>work/results/download_attempts.txt; then
+              size=$(stat -c '%s' "$out")
+              echo "SUCCESS size=$size url=$url" | tee -a work/results/download_attempts.txt
+              # Leica advertises 60.67 MB; reject HTML/error bodies that happened
+              # to return HTTP 200.
+              if [ "$size" -gt 50000000 ]; then
+                printf '%s\n' "$url" > work/results/source_url.txt
+                success=1
+                break
+              fi
+              echo "REJECT undersized response" | tee -a work/results/download_attempts.txt
+            else
+              echo "FAILED $url" | tee -a work/results/download_attempts.txt
+            fi
+          done
+
+          if [ "$success" -ne 1 ]; then
+            echo 'All Leica-owned firmware URL attempts failed.' >&2
+            exit 11
+          fi
+
+          stat -c 'firmware_size=%s' "$out" | tee work/results/source_size.txt
+          sha256sum "$out" | tee work/results/source_sha256.txt
 
       - name: Decompress firmware
         run: |
@@ -48,27 +86,35 @@ jobs:
           sha256sum work/fw/LEICA_M11-P_2.6.1_unpacked.bin \
             | tee work/results/unpacked_sha256.txt
 
-      - name: Verify ROMFS and extract only r2y.bin ephemerally
+      - name: Inventory ROMFS and extract named image-pipeline assets ephemerally
         run: |
           python tools/m11_romfs_probe.py \
             work/fw/LEICA_M11-P_2.6.1_unpacked.bin \
             --scan \
+            --list-files \
             --find-file r2y.bin \
+            --find-file R2Y_CC0_CM.bin \
+            --find-file R2Y_TF_REMAPPING_CM.bin \
             --extract-found-dir work/extracted \
-            | tee work/results/romfs_probe.txt
-          find work/extracted -type f -printf '%p %s bytes\n' \
-            | tee work/results/extracted_file_inventory.txt
-          find work/extracted -type f -exec sha256sum {} \; \
-            | tee work/results/extracted_file_hashes.txt
+            | tee work/results/romfs_probe_full.txt
 
-      - name: Probe recorded R2Y signatures
+          grep -Ei '/img/data/.*(R2Y|Y2R|TF|GAMMA|GAM|TONE)|/img/data/r2y\.bin' \
+            work/results/romfs_probe_full.txt \
+            > work/results/image_pipeline_named_asset_inventory.txt || true
+
+          find work/extracted -type f -printf '%p %s bytes\n' \
+            | sort | tee work/results/extracted_file_inventory.txt
+          find work/extracted -type f -exec sha256sum {} \; \
+            | sort | tee work/results/extracted_file_hashes.txt
+
+      - name: Reproduce recorded R2Y signatures
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t r2ys < <(find work/extracted -type f -name r2y.bin | sort)
           if [ "${#r2ys[@]}" -eq 0 ]; then
             echo 'No structured r2y.bin extraction found' >&2
-            exit 2
+            exit 12
           fi
           for i in "${!r2ys[@]}"; do
             n=$((i+1))
@@ -77,12 +123,37 @@ jobs:
               | tee "work/results/r2y_signature_probe_${n}.txt"
           done
 
+      - name: Probe named CC/tone assets and gamma candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t assets < <(find work/extracted -type f \
+            \( -name 'R2Y_CC0_CM.bin' -o -name 'R2Y_TF_REMAPPING_CM.bin' \) | sort)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo 'Named R2Y CC0/tone assets were not extracted' >&2
+            exit 13
+          fi
+          python tools/probe_m11_extracted_assets.py \
+            "${assets[@]}" \
+            --out work/results/named_asset_probe.json \
+            --derived-dir work/derived \
+            | tee work/results/named_asset_probe.txt
+
+          # Derived CSVs contain only reconstructed numeric tables, never arbitrary
+          # firmware file contents.  Hash/inventory them for provenance.
+          find work/derived -type f -printf '%p %s bytes\n' \
+            | sort | tee work/results/derived_asset_inventory.txt || true
+          find work/derived -type f -exec sha256sum {} \; \
+            | sort | tee work/results/derived_asset_hashes.txt || true
+          cp -a work/derived/. work/results/derived/ 2>/dev/null || true
+
       - name: Upload derived forensic summaries only
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m11p-261-firmware-derived-probe
+          name: m11p-261-firmware-derived-probe-r2
           path: work/results/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Explicitly remove proprietary firmware before job completion
