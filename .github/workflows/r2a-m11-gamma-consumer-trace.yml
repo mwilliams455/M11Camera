@@ -1,0 +1,61 @@
+name: R2A M11 gamma consumer trace
+
+on:
+  push:
+    branches:
+      - research/m11-r0-evidence-input-space
+    paths:
+      - 'tools/trace_m11_gamma_consumers.py'
+      - 'tools/decompress_m11.py'
+      - 'tools/m11_romfs_probe.py'
+      - '.github/workflows/r2a-m11-gamma-consumer-trace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download official Leica M11-P 2.6.1 firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 --retry-delay 2 \
+            -o /tmp/LEICA_M11-P_2.6.1.FW \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
+          test "$(stat -c%s /tmp/LEICA_M11-P_2.6.1.FW)" = "63621633"
+          echo '0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83  /tmp/LEICA_M11-P_2.6.1.FW' | sha256sum -c -
+
+      - name: Decompress and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/decompress_m11.py \
+            /tmp/LEICA_M11-P_2.6.1.FW \
+            -o /tmp/M11P_2.6.1_unpacked.bin
+          test "$(stat -c%s /tmp/M11P_2.6.1_unpacked.bin)" = "97644400"
+          echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P_2.6.1_unpacked.bin' | sha256sum -c -
+
+      - name: Trace gamma strings to ROMFS consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/r2a
+          python tools/trace_m11_gamma_consumers.py \
+            /tmp/M11P_2.6.1_unpacked.bin \
+            --output /tmp/r2a/gamma_consumer_trace.md
+          cat /tmp/r2a/gamma_consumer_trace.md
+
+      - name: Upload derived trace report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-gamma-consumer-trace
+          path: /tmp/r2a/gamma_consumer_trace.md
+          if-no-files-found: error
+          retention-days: 14
