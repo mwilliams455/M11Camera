@@ -176,9 +176,9 @@ jobs:
           test -s "$INC/ddim_user_custom.h"
 
           # ddarm.h still includes the pre-refactor ddtop.h name even though the
-          # exact pinned file lives in LSITop/src.  Alias that exact header family
+          # exact pinned file lives in LSITop/src. Alias that exact header family
           # into ARM/src so its quoted sibling includes resolve without synthesizing
-          # any TOP-driver declarations.  dd_arm.h is likewise the documented
+          # any TOP-driver declarations. dd_arm.h is likewise the documented
           # original filename of the exact pinned ddarm.h implementation/header.
           ARM_SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/DeviceDriver/ARM/src"
           LSITOP_SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/DeviceDriver/LSITop/src"
@@ -190,6 +190,17 @@ jobs:
           test -s "$ARM_SRC/ddarm.h"
           ln -sf ddarm.h "$ARM_SRC/dd_arm.h"
           test -s "$ARM_SRC/dd_arm.h"
+
+          # ddtop.h also names the refactored KChiptop headers directly. Their exact
+          # pinned definitions live in MILB_Header/Project/Top/src, outside the
+          # current compiler include list. Alias those exact files into the same
+          # searched ARM directory; no chip-top declarations are synthesized.
+          CHIPTOP_SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/MILB_Header/Project/Top/src"
+          for h in kchiptop1.h kchiptop2.h kchiptop3.h; do
+            test -s "$CHIPTOP_SRC/$h"
+            ln -sf "$CHIPTOP_SRC/$h" "$ARM_SRC/$h"
+            test -s "$ARM_SRC/$h"
+          done
 
           # Public change notes document these two generated R2Y register headers as
           # renamed during the ETK refactor, while jdsr2yf2e.h still includes their
