@@ -1,0 +1,66 @@
+{
+  "evidence_class": "recorded_legacy_derivative_not_firmware_reextraction",
+  "date_recorded": "2026-09-08",
+  "source_artifacts": [
+    {
+      "name": "Leica_M11P_Standard_v04_COLOR_LOCKED_sRGB_33.cube",
+      "role": "baseline colour-locked LUT with no added Leica tone"
+    },
+    {
+      "name": "Leica_M11P_Standard_v04_TONE20_sRGB_33.cube",
+      "role": "20% blend toward recovered firmware Standard Q12 tone response"
+    },
+    {
+      "name": "Leica_M11P_Standard_v04_TONE35_sRGB_33.cube",
+      "role": "35% blend toward recovered firmware Standard Q12 tone response"
+    }
+  ],
+  "provenance_note": "The original cube headers explicitly describe TONE20/TONE35 as 20%/35% blends toward the recovered firmware Standard Q12 tone response and describe COLOR_LOCKED as having no added Leica tone. These cubes are therefore retained only as a derivative cross-check/recovery path while exact firmware assets are unavailable; they do not define the project architecture.",
+  "axis": "first 33 LUT entries, corresponding to the pure-red input axis in .cube ordering used by the generator",
+  "input_grid": [
+    0.0, 0.03125, 0.0625, 0.09375, 0.125, 0.15625, 0.1875, 0.21875,
+    0.25, 0.28125, 0.3125, 0.34375, 0.375, 0.40625, 0.4375, 0.46875,
+    0.5, 0.53125, 0.5625, 0.59375, 0.625, 0.65625, 0.6875, 0.71875,
+    0.75, 0.78125, 0.8125, 0.84375, 0.875, 0.90625, 0.9375, 0.96875, 1.0
+  ],
+  "baseline_red_output": [
+    0.0,
+    0.034857924, 0.067972874, 0.100678425, 0.133383977, 0.166089528,
+    0.198795080, 0.231500631, 0.264206183, 0.296911734, 0.329617286,
+    0.362322837, 0.395028389, 0.427733940, 0.460439492, 0.493145043,
+    0.525850595, 0.558556146, 0.591261698, 0.623967249, 0.656672801,
+    0.689378352, 0.722083904, 0.754789455, 0.787495007, 0.820200558,
+    0.852906110, 0.885611661, 0.918317213, 0.950423150, 0.980720089,
+    1.0, 1.0
+  ],
+  "tone20_red_output": [
+    0.0,
+    0.031308010, 0.062590832, 0.093942581, 0.125363308, 0.156840577,
+    0.188388150, 0.220112837, 0.252009060, 0.283994341, 0.316322836,
+    0.348921072, 0.381695805, 0.415213259, 0.449059893, 0.483402469,
+    0.518409008, 0.553425428, 0.588417737, 0.623354908, 0.658199925,
+    0.692983700, 0.727649001, 0.762212694, 0.796658223, 0.831005217,
+    0.865253987, 0.899213453, 0.933002224, 0.965899307, 0.996726170,
+    1.0, 1.0
+  ],
+  "tone35_red_output": [
+    0.0,
+    0.028645574, 0.058315936, 0.088596117, 0.119003198, 0.149514090,
+    0.180153891, 0.211118212, 0.242395641, 0.273834275, 0.305896771,
+    0.338445767, 0.371309428, 0.405507240, 0.440283190, 0.475930304,
+    0.512737817, 0.549537270, 0.586273162, 0.622895143, 0.659342270,
+    0.695671828, 0.731786745, 0.767718773, 0.803441095, 0.838989227,
+    0.874364844, 0.909239357, 0.943818608, 0.977294340,
+    1.0, 1.0, 1.0
+  ],
+  "blend_fractions": {
+    "tone20": 0.20,
+    "tone35": 0.35
+  },
+  "working_recovery_equation": "full_tone_output = baseline + (blended_output - baseline) / blend_fraction; gain = full_tone_output / baseline",
+  "candidate_tone_coordinate_equation": "x_candidate = (77/255) * baseline_red_output",
+  "candidate_coordinate_status": "inferred_from_recorded_tone-luma weights and luminance-preserving scaling; generator semantics still require independent verification",
+  "recorded_standard_q12_gain_range": [1911, 4867],
+  "recorded_q12_denominator": 4096,
+  "clipping_rule_for_recovery": "exclude baseline<=0 and any sample where TONE20 or TONE35 is clipped at/near 1.0; use agreement between independently reconstructed 20% and 35% gains as a validity check"
+}
