@@ -28,7 +28,13 @@ jobs:
           set -euo pipefail
           mkdir -p work/fw work/extracted work/results
           url='https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
-          curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
+          referer='https://leica-camera.com/en-GB/photography/cameras/m/m11-p-black/downloads'
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
+          curl --http1.1 -fL --retry 5 --retry-all-errors --retry-delay 3 \
+            --connect-timeout 30 --max-time 180 \
+            -A "$ua" -e "$referer" \
+            -H 'Accept: application/octet-stream,application/*;q=0.9,*/*;q=0.8' \
+            -H 'Accept-Language: en-GB,en;q=0.9' \
             "$url" -o work/fw/LEICA_M11-P_2.6.1.FW
           stat -c 'firmware_size=%s' work/fw/LEICA_M11-P_2.6.1.FW | tee work/results/source_size.txt
           sha256sum work/fw/LEICA_M11-P_2.6.1.FW | tee work/results/source_sha256.txt
