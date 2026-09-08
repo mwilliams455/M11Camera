@@ -6,6 +6,7 @@ on:
     paths:
       - 'tools/solve_m11_global_string_relocation.py'
       - 'tools/probe_m11_arm_region_layout.py'
+      - 'tools/probe_m11_r2y_debug_metadata.py'
       - 'tools/decompress_m11.py'
       - '.github/workflows/r2a-m11-pcrel-xrefs.yml'
   workflow_dispatch:
@@ -86,6 +87,13 @@ jobs:
           set -euo pipefail
           python tools/probe_m11_arm_region_layout.py /tmp/M11P.bin --output /tmp/r2a/arm_region_layout.md
           cat /tmp/r2a/arm_region_layout.md
+
+      - name: Probe R2Y debug and symbol metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/probe_m11_r2y_debug_metadata.py /tmp/M11P.bin --output /tmp/r2a/r2y_debug_metadata.md
+          cat /tmp/r2a/r2y_debug_metadata.md
 
       - name: Upload derived reports only
         uses: actions/upload-artifact@v4
