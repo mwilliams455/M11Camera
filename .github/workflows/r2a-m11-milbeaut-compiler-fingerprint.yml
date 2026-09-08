@@ -175,6 +175,22 @@ jobs:
           test -s "$INC/ddimusercustom.h"
           test -s "$INC/ddim_user_custom.h"
 
+          # ddarm.h still includes the pre-refactor ddtop.h name even though the
+          # exact pinned file lives in LSITop/src.  Alias that exact header family
+          # into ARM/src so its quoted sibling includes resolve without synthesizing
+          # any TOP-driver declarations.  dd_arm.h is likewise the documented
+          # original filename of the exact pinned ddarm.h implementation/header.
+          ARM_SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/DeviceDriver/ARM/src"
+          LSITOP_SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/DeviceDriver/LSITop/src"
+          for h in ddtop.h ddtopone.h ddtoptwo.h ddtopthree.h ddtopfour.h; do
+            test -s "$LSITOP_SRC/$h"
+            ln -sf "../../LSITop/src/$h" "$ARM_SRC/$h"
+            test -s "$ARM_SRC/$h"
+          done
+          test -s "$ARM_SRC/ddarm.h"
+          ln -sf ddarm.h "$ARM_SRC/dd_arm.h"
+          test -s "$ARM_SRC/dd_arm.h"
+
           # Public change notes document these two generated R2Y register headers as
           # renamed during the ETK refactor, while jdsr2yf2e.h still includes their
           # original names. Alias the exact pinned replacements; do not synthesize
@@ -185,10 +201,10 @@ jobs:
           test -s "$REGINC/__fr2y6a.h"
           test -s "$REGINC/__jdsr2y_f2e_sram.h"
 
-          # imr2y.h still uses the pre-refactor `union io_r2y_*` tags while the exact
-          # pinned generated headers expose the same unions as `_IoR2y*`.  Resolve
-          # those tags mechanically from the generated typedef declarations.  This
-          # changes names only: every replacement points at an exact pinned union.
+          # imr2y.h still uses pre-refactor `union/struct io_r2y_*` tags while the
+          # exact pinned generated headers expose the same declarations as
+          # `_IoR2y*`. Resolve those tags mechanically from exact generated typedefs.
+          # This changes names only; no register layout or processing code is added.
           python - <<'PY'
           import re
           from pathlib import Path
@@ -196,33 +212,42 @@ jobs:
           root = Path('public-milbeaut/MILB_API')
           hdr = root / 'Project/ImageMacro/src/imr2y.h'
           text = hdr.read_text()
-          old_tags = sorted(set(re.findall(r'\bunion\s+(io_r2y_[A-Za-z0-9_]+)', text)))
           generated = ''
           for p in (root / 'MILB_Header').rglob('*.h'):
               generated += '\n' + p.read_text(errors='ignore')
-          new_tags = sorted(set(re.findall(r'typedef\s+union\s+(_IoR2y[A-Za-z0-9_]+)\s+IoR2y[A-Za-z0-9_]+\s*;', generated)))
-          by_norm = {}
-          for tag in new_tags:
-              suffix = tag[len('_IoR2y'):]
-              by_norm[re.sub(r'[^a-z0-9]', '', suffix.lower())] = tag
-          unresolved = []
+
           replacements = []
-          for old in old_tags:
-              suffix = old[len('io_r2y_'):]
-              new = by_norm.get(re.sub(r'[^a-z0-9]', '', suffix.lower()))
-              if not new:
-                  unresolved.append(old)
-                  continue
-              text = re.sub(r'\bunion\s+' + re.escape(old) + r'\b', 'union ' + new, text)
-              replacements.append((old, new))
+          unresolved = []
+          for kind in ('union', 'struct'):
+              old_tags = sorted(set(re.findall(r'\b' + kind + r'\s+(io_r2y_[A-Za-z0-9_]+)', text)))
+              pat = r'typedef\s+' + kind + r'\s+(_IoR2y[A-Za-z0-9_]+)\s+IoR2y[A-Za-z0-9_]+\s*;'
+              new_tags = sorted(set(re.findall(pat, generated)))
+              by_norm = {}
+              for tag in new_tags:
+                  suffix = tag[len('_IoR2y'):]
+                  by_norm[re.sub(r'[^a-z0-9]', '', suffix.lower())] = tag
+              for old in old_tags:
+                  suffix = old[len('io_r2y_'):]
+                  new = by_norm.get(re.sub(r'[^a-z0-9]', '', suffix.lower()))
+                  if not new:
+                      unresolved.append((kind, old))
+                      continue
+                  text = re.sub(r'\b' + kind + r'\s+' + re.escape(old) + r'\b', kind + ' ' + new, text)
+                  replacements.append((kind, old, new))
+
           if unresolved:
-              raise SystemExit('unresolved old R2Y union tags: ' + ', '.join(unresolved))
+              raise SystemExit('unresolved old R2Y tags: ' + ', '.join(f'{k} {t}' for k, t in unresolved))
           hdr.write_text(text)
-          print(f'bridged {len(replacements)} exact R2Y union tag(s)')
-          for old, new in replacements:
-              print(f'  {old} -> {new}')
-          if ('io_r2y_ee0ctl', '_IoR2yEe0ctl') not in replacements:
-              raise SystemExit('expected EE0CTL refactor bridge missing')
+          print(f'bridged {len(replacements)} exact R2Y union/struct tag(s)')
+          for kind, old, new in replacements:
+              print(f'  {kind} {old} -> {kind} {new}')
+          required = {
+              ('union', 'io_r2y_ee0ctl', '_IoR2yEe0ctl'),
+              ('struct', 'io_r2y_mck', '_IoR2yMck'),
+              ('struct', 'io_r2y_mcl', '_IoR2yMcl'),
+          }
+          if not required.issubset(set(replacements)):
+              raise SystemExit('expected EE0CTL/MCK/MCL refactor bridge missing')
           PY
 
       - name: Compile target Milbeaut R2Y objects
