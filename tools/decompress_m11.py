@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Decompress Leica M11/M11-P firmware payloads used by the forensic work.
 
-Recovered from the original M11 research script and parameterized so the public
-repo does not assume /mnt/data paths. The firmware itself is deliberately not
-stored in this repository.
+The M11/M11-P updater uses one marker byte followed by literal bytes or
+back-references. Length and offset values are unsigned base-128 continuation
+integers (7 payload bits per byte, most-significant group first). This matters:
+real M11-P 2.6.1 contains three-byte values such as ``81 80 00`` = 16384.
+
+The firmware itself is deliberately not stored in this repository.
 """
 from __future__ import annotations
 
@@ -11,6 +14,36 @@ import argparse
 import hashlib
 import struct
 from pathlib import Path
+
+
+def read_base128_uint(buf: bytes, pos: int) -> tuple[int, int]:
+    """Decode one big-endian 7-bit continuation integer.
+
+    Each byte contributes 7 payload bits. Bit 7 means another byte follows.
+    Examples from genuine M11-P 2.6.1 firmware:
+
+    - ``10``       -> 16
+    - ``90 00``    -> 2048
+    - ``a0 00``    -> 4096
+    - ``c0 00``    -> 8192
+    - ``81 80 00`` -> 16384
+    """
+    value = 0
+    groups = 0
+    while True:
+        if pos >= len(buf):
+            raise ValueError("truncated base-128 integer")
+        byte = buf[pos]
+        pos += 1
+        value = (value << 7) | (byte & 0x7F)
+        groups += 1
+        # Values in the observed format are bounded to 16-bit copy lengths /
+        # distances. Keep a defensive guard so malformed firmware cannot create
+        # an unbounded integer loop.
+        if groups > 5:
+            raise ValueError("base-128 integer is implausibly long")
+        if not (byte & 0x80):
+            return value, pos
 
 
 def decompress_firmware(src: Path, outp: Path) -> None:
@@ -52,6 +85,7 @@ def decompress_firmware(src: Path, outp: Path) -> None:
     i = 1
     n = len(body)
     refs = escapes = literals = 0
+    max_length = max_offset = 0
 
     while i < n:
         b = body[i]
@@ -69,27 +103,8 @@ def decompress_firmware(src: Path, outp: Path) -> None:
                 continue
 
             j = i + 1
-            a = body[j]
-            j += 1
-            if a & 0x80:
-                if j >= n:
-                    raise ValueError("truncated length")
-                length = ((a & 0x7F) << 7) + body[j]
-                j += 1
-            else:
-                length = a
-
-            if j >= n:
-                raise ValueError("truncated offset")
-            a = body[j]
-            j += 1
-            if a & 0x80:
-                if j >= n:
-                    raise ValueError("truncated extended offset")
-                offset = ((a & 0x7F) << 7) + body[j]
-                j += 1
-            else:
-                offset = a
+            length, j = read_base128_uint(body, j)
+            offset, j = read_base128_uint(body, j)
 
             if offset == 0 or offset > len(out):
                 raise ValueError(
@@ -97,13 +112,14 @@ def decompress_firmware(src: Path, outp: Path) -> None:
                     f"out {len(out):#x}, len {length}"
                 )
 
-            # The original compressor appeared to emit non-overlapping refs, but
-            # copy byte-by-byte so overlapping LZ-style references are safe too.
-            start = len(out) - offset
-            for k in range(length):
-                out.append(out[start + k])
+            # Copy from the current output tail rather than from one fixed slice.
+            # This correctly supports overlapping LZ-style references.
+            for _ in range(length):
+                out.append(out[-offset])
             i = j
             refs += 1
+            max_length = max(max_length, length)
+            max_offset = max(max_offset, offset)
 
         if len(out) > unpacked_size + 1024:
             raise ValueError(
@@ -124,6 +140,10 @@ def decompress_firmware(src: Path, outp: Path) -> None:
         escapes,
         "literals",
         literals,
+        "max_length",
+        max_length,
+        "max_offset",
+        max_offset,
     )
 
     if len(out) != unpacked_size:
@@ -135,6 +155,7 @@ def decompress_firmware(src: Path, outp: Path) -> None:
     outp.parent.mkdir(parents=True, exist_ok=True)
     outp.write_bytes(out)
     print("wrote", outp)
+    print("sha256", hashlib.sha256(out).hexdigest())
     print("first 128", out[:128].hex())
 
 
