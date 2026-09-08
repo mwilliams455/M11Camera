@@ -26,14 +26,19 @@ jobs:
         run: |
           python -m py_compile tools/decompress_m11.py
           python -m py_compile tools/m11_romfs_probe.py
+          python -m py_compile tools/probe_r2y_recorded_signatures.py
+          python -m py_compile tools/probe_m11_extracted_assets.py
+          python -m py_compile tools/probe_m11_corpus.py
+          python -m py_compile tools/probe_m11_pixel_chroma_fast.py
           python -m py_compile renderer/reference/leica_m11_reference_renderer.py
           python -m py_compile renderer/reference/validate_forensics_data.py
           python -m py_compile renderer/source_adapter/dng_dual_illuminant.py
+          python -m py_compile renderer/m11_core/reference_basis.py
 
       - name: Run proprietary-free recovery/source tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Explain table-validation gate
         run: |
-          echo 'The four firmware-derived table files are intentionally not fabricated in CI.'
-          echo 'validate_forensics_data.py is run once a recovered/extracted table directory is supplied.'
+          echo 'Firmware binaries remain ephemeral and are never committed.'
+          echo 'Derived tables are accepted only after the recorded firmware constraints reproduce.'
