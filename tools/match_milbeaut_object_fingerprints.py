@@ -6,6 +6,9 @@ Milbeaut evidence; M11-P 2.6.1 remains the primary target. ELF relocation words
 and link-sensitive ARM branch immediates are excluded from exact fingerprints.
 The report emits only derived instruction metadata and target offsets, never
 Leica firmware bytes or redistributable public object files.
+
+Compile-only compatibility headers are supplied separately and do not alter
+this matcher or the public R2Y processing implementation.
 """
 from __future__ import annotations
 
