@@ -1,0 +1,78 @@
+name: R2 M11 tone domain probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/m11-r0-evidence-input-space
+    paths:
+      - 'tools/probe_m11_tone_domain_consistency.py'
+      - '.github/workflows/r2-m11-tone-domain-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libimage-exiftool-perl libgl1
+          python -m pip install --disable-pip-version-check numpy rawpy pillow opencv-python-headless
+
+      - name: Download 12 original matched M11 pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/m11 work/results
+          base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
+          for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
+            for ext in dng jpg; do
+              f="leica_m11_${n}.${ext}"
+              curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
+                "$base/$f" -o "work/m11/$f"
+            done
+          done
+
+      - name: Test tone coordinate and JPEG output domains
+        run: |
+          python tools/probe_m11_tone_domain_consistency.py \
+            --dir work/m11 \
+            --pairs 01 04 05 10 14 20 24 31 34 37 38 45 \
+            --out work/results/tone_domain_consistency.json \
+            | tee work/results/tone_domain_consistency.txt
+
+      - name: Print compact decision table
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('work/results/tone_domain_consistency.json'))
+          print('valid pairs', d['valid_pair_count'], '/', d['pair_count'])
+          for route in ('H0','H1'):
+              for domain in ('linear','code'):
+                  m=d['comparisons'][route][domain]
+                  print(route, domain,
+                        'bins', m['eligible_bin_count'],
+                        'median_log_resid', m['scene_bin_log_abs_residual_median'],
+                        'mean_log_resid', m['scene_bin_log_abs_residual_mean'],
+                        'g05/g50/g95', m['pooled_gain_p05'],m['pooled_gain_p50'],m['pooled_gain_p95'])
+          PY
+
+      - name: Upload derived metrics only
+        uses: actions/upload-artifact@v4
+        with:
+          name: m11-r2-tone-domain-consistency
+          path: work/results/
+          if-no-files-found: error
+          retention-days: 7
