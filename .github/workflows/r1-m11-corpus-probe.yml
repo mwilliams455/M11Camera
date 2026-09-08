@@ -15,7 +15,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,30 +31,28 @@ jobs:
           sudo apt-get install -y --no-install-recommends libimage-exiftool-perl
           python -m pip install --disable-pip-version-check numpy
 
-      - name: Download selected original Photography Blog pairs
+      - name: Download 12 original Photography Blog M11 DNGs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p work/m11
           base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
-          for n in 04 05 34 38; do
-            for ext in dng jpg; do
-              f="leica_m11_${n}.${ext}"
-              echo "Downloading $f"
-              curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
-                "$base/$f" -o "work/m11/$f"
-            done
+          for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
+            f="leica_m11_${n}.dng"
+            echo "Downloading $f"
+            curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 \
+              "$base/$f" -o "work/m11/$f"
           done
 
-      - name: Hash source pairs
+      - name: Hash source DNGs
         run: |
           cd work/m11
-          sha256sum leica_m11_* > sha256sums.txt
+          sha256sum leica_m11_*.dng > sha256sums.txt
           cat sha256sums.txt
 
       - name: Dump complete ExifTool metadata
         run: |
-          exiftool -json -G1 -a -u -n work/m11/leica_m11_* > work/m11/exiftool_all.json
+          exiftool -json -G1 -a -u -n work/m11/*.dng > work/m11/exiftool_all.json
           exiftool -G1 -a -u -n \
             -Make -Model -Software -ISO -ExposureTime -FNumber \
             -BlackLevel -WhiteLevel -CalibrationIlluminant1 -CalibrationIlluminant2 \
@@ -63,7 +61,7 @@ jobs:
             -ProfileName -ProfileLookTableDims -ProfileLookTableData \
             work/m11/*.dng | tee work/m11/key_metadata.txt
 
-      - name: Run M11 input-space hypothesis probe
+      - name: Run M11 input-space/reference-basis probe
         run: |
           python tools/probe_m11_corpus.py \
             --exif work/m11/exiftool_all.json \
@@ -72,7 +70,7 @@ jobs:
       - name: Upload forensic results only
         uses: actions/upload-artifact@v4
         with:
-          name: m11-r1-matched-corpus-probe
+          name: m11-r1-12dng-reference-basis-probe
           path: |
             work/m11/sha256sums.txt
             work/m11/exiftool_all.json
