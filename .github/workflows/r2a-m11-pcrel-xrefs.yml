@@ -5,6 +5,7 @@ on:
     branches: [research/m11-r0-evidence-input-space]
     paths:
       - 'tools/trace_m11_pcrel_xrefs.py'
+      - 'tools/probe_m11_section_relative_refs.py'
       - 'tools/decompress_m11.py'
       - '.github/workflows/r2a-m11-pcrel-xrefs.yml'
   workflow_dispatch:
@@ -79,10 +80,17 @@ jobs:
           python tools/trace_m11_pcrel_xrefs.py /tmp/M11P.bin --output /tmp/r2a/pcrel_xrefs.md
           cat /tmp/r2a/pcrel_xrefs.md
 
-      - name: Upload derived report only
+      - name: Probe section-relative/addend references
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/probe_m11_section_relative_refs.py /tmp/M11P.bin --output /tmp/r2a/section_relative_refs.md
+          cat /tmp/r2a/section_relative_refs.md
+
+      - name: Upload derived reports only
         uses: actions/upload-artifact@v4
         with:
-          name: r2a-m11-pcrel-xrefs
-          path: /tmp/r2a/pcrel_xrefs.md
+          name: r2a-m11-relocation-xrefs
+          path: /tmp/r2a/*.md
           retention-days: 14
           if-no-files-found: error
