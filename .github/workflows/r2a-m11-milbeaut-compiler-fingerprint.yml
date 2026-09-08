@@ -186,16 +186,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p /tmp/r2a
           SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/ImageMacro"
           cd "$SRC"
           rm -rf obj dep asm
           mkdir -p obj dep asm
           PREFIX=/tmp/gcc-arm/bin/arm-none-eabi-
-          make GNUarm="$PREFIX" ENABLE_NEON=y PRIORITY_OPTION=fast \
-            obj/imr2yset.o obj/imr2yctrl2.o
 
-          # Public make rules prefix compile recipes with '-', so compiler errors can
-          # otherwise be ignored. Missing/empty target objects are fatal here.
+          # Capture the exact compiler stream before explicit object validation.
+          # The public make recipes prefix compile commands with '-', so make's own
+          # status cannot be trusted as the sole failure signal.
+          set +e
+          make GNUarm="$PREFIX" ENABLE_NEON=y PRIORITY_OPTION=fast \
+            obj/imr2yset.o obj/imr2yctrl2.o 2>&1 | tee /tmp/r2a/compile.log
+          MAKE_RC=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "make_rc=$MAKE_RC"
+            echo "compiler=$($PREFIX\gcc --version | head -n1)"
+            echo
+            grep -E -m 80 'fatal error:|(^|[[:space:]])error:|undefined reference|No such file or directory' /tmp/r2a/compile.log || true
+          } > /tmp/r2a/compile-errors.txt
+          cat /tmp/r2a/compile-errors.txt
+
+          # Missing/empty target objects remain authoritative and fatal.
           for o in obj/imr2yset.o obj/imr2yctrl2.o; do
             test -s "$o" || { echo "ERROR: target object not produced: $o" >&2; exit 1; }
             "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
@@ -206,6 +220,17 @@ jobs:
             "$PREFIX"nm -S --size-sort "$o" | grep -Ei 'gamma|r2y_set_gamma|r2y_ctrl2_gamma' || true
             "$PREFIX"objdump -dr "$o" | grep -Ei -A12 -B4 'gamma|set_gamma|ctrl2_gamma' | head -n 400 || true
           done | tee /tmp/milbeaut-build-summary.txt
+
+      - name: Upload concise compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-milbeaut-compile-diagnostics
+          path: |
+            /tmp/r2a/compile-errors.txt
+            /tmp/gcc-version.txt
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Install fingerprint dependencies
         run: python -m pip install --quiet pyelftools capstone
