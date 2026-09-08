@@ -6,6 +6,7 @@ on:
     paths:
       - 'tools/trace_m11_pcrel_xrefs.py'
       - 'tools/probe_m11_section_relative_refs.py'
+      - 'tools/probe_m11_arm_region_layout.py'
       - 'tools/decompress_m11.py'
       - '.github/workflows/r2a-m11-pcrel-xrefs.yml'
   workflow_dispatch:
@@ -86,6 +87,13 @@ jobs:
           set -euo pipefail
           python tools/probe_m11_section_relative_refs.py /tmp/M11P.bin --output /tmp/r2a/section_relative_refs.md
           cat /tmp/r2a/section_relative_refs.md
+
+      - name: Probe ARM text/data layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/probe_m11_arm_region_layout.py /tmp/M11P.bin --output /tmp/r2a/arm_region_layout.md
+          cat /tmp/r2a/arm_region_layout.md
 
       - name: Upload derived reports only
         uses: actions/upload-artifact@v4
