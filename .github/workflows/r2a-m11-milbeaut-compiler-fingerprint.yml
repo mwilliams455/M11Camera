@@ -121,6 +121,7 @@ jobs:
           typedef unsigned long long kuint64;
           typedef signed long klong;
           typedef unsigned long kulong;
+          typedef unsigned char kuchar;
           typedef void VOID;
           typedef char CHAR;
           typedef unsigned char UCHAR;
@@ -183,6 +184,46 @@ jobs:
           ln -sf jdsr2yf2esram.h "$REGINC/__jdsr2y_f2e_sram.h"
           test -s "$REGINC/__fr2y6a.h"
           test -s "$REGINC/__jdsr2y_f2e_sram.h"
+
+          # imr2y.h still uses the pre-refactor `union io_r2y_*` tags while the exact
+          # pinned generated headers expose the same unions as `_IoR2y*`.  Resolve
+          # those tags mechanically from the generated typedef declarations.  This
+          # changes names only: every replacement points at an exact pinned union.
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          root = Path('public-milbeaut/MILB_API')
+          hdr = root / 'Project/ImageMacro/src/imr2y.h'
+          text = hdr.read_text()
+          old_tags = sorted(set(re.findall(r'\bunion\s+(io_r2y_[A-Za-z0-9_]+)', text)))
+          generated = ''
+          for p in (root / 'MILB_Header').rglob('*.h'):
+              generated += '\n' + p.read_text(errors='ignore')
+          new_tags = sorted(set(re.findall(r'typedef\s+union\s+(_IoR2y[A-Za-z0-9_]+)\s+IoR2y[A-Za-z0-9_]+\s*;', generated)))
+          by_norm = {}
+          for tag in new_tags:
+              suffix = tag[len('_IoR2y'):]
+              by_norm[re.sub(r'[^a-z0-9]', '', suffix.lower())] = tag
+          unresolved = []
+          replacements = []
+          for old in old_tags:
+              suffix = old[len('io_r2y_'):]
+              new = by_norm.get(re.sub(r'[^a-z0-9]', '', suffix.lower()))
+              if not new:
+                  unresolved.append(old)
+                  continue
+              text = re.sub(r'\bunion\s+' + re.escape(old) + r'\b', 'union ' + new, text)
+              replacements.append((old, new))
+          if unresolved:
+              raise SystemExit('unresolved old R2Y union tags: ' + ', '.join(unresolved))
+          hdr.write_text(text)
+          print(f'bridged {len(replacements)} exact R2Y union tag(s)')
+          for old, new in replacements:
+              print(f'  {old} -> {new}')
+          if ('io_r2y_ee0ctl', '_IoR2yEe0ctl') not in replacements:
+              raise SystemExit('expected EE0CTL refactor bridge missing')
+          PY
 
       - name: Compile target Milbeaut R2Y objects
         shell: bash
