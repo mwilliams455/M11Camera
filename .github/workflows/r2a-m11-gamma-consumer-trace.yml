@@ -23,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download official Leica M11-P 2.6.1 firmware
+      - name: Download hash-gated Leica M11-P 2.6.1 firmware
         shell: bash
         run: |
           set -euo pipefail
@@ -33,16 +33,21 @@ jobs:
             'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
             'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'
             'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
+            'https://fichiers.touslesdrivers.com/84657/LEICA_M11-P_2.6.1.FW'
           )
           rm -f /tmp/LEICA_M11-P_2.6.1.FW
           for url in "${urls[@]}"; do
-            echo "Trying official Leica firmware endpoint: ${url%%\?*}"
+            echo "Trying firmware endpoint: ${url%%\?*}"
             if curl --http1.1 -L --fail --retry 2 --retry-all-errors --retry-delay 2 \
               -A "$ua" -e "$referer" \
               -H 'Accept: application/octet-stream,*/*;q=0.8' \
               -o /tmp/LEICA_M11-P_2.6.1.FW "$url"; then
               if [ "$(stat -c%s /tmp/LEICA_M11-P_2.6.1.FW)" = "63621633" ]; then
-                break
+                actual_sha="$(sha256sum /tmp/LEICA_M11-P_2.6.1.FW | awk '{print $1}')"
+                if [ "$actual_sha" = '0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83' ]; then
+                  echo "Exact firmware identity verified."
+                  break
+                fi
               fi
             fi
             rm -f /tmp/LEICA_M11-P_2.6.1.FW
