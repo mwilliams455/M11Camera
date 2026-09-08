@@ -165,12 +165,23 @@ def _join_path(parent: str, name: str) -> str:
     return f"{parent.rstrip('/')}/{name}"
 
 
-def walk_romfs(romfs: bytes, root_header_rel: int) -> list[RomfsEntry]:
+def walk_romfs(
+    romfs: bytes,
+    root_header_rel: int,
+    *,
+    allow_duplicate_headers: bool = False,
+) -> list[RomfsEntry]:
     """Return the ROMFS tree in deterministic directory/sibling order.
 
     Directory `spec_info` is the relative offset of its first child. Hard links
-    are listed but never recursively followed, avoiding the conventional `.` and
-    `..` cycles found in ROMFS directory trees.
+    are listed but never recursively followed, avoiding conventional hard-link
+    cycles.  By default, a header referenced from more than one directory chain
+    remains an error because it can indicate a corrupt parse.
+
+    For forensic best-effort ownership scans, ``allow_duplicate_headers=True``
+    permits an already-seen header to be skipped while following its encoded
+    sibling pointer.  The duplicate is never emitted twice or recursively
+    followed, so this mode cannot manufacture additional file payloads.
     """
     root = parse_entry(romfs, root_header_rel, "/")
     entries: list[RomfsEntry] = [root]
@@ -185,7 +196,11 @@ def walk_romfs(romfs: bytes, root_header_rel: int) -> list[RomfsEntry]:
                 raise ValueError(f"ROMFS sibling loop at {rel:#x}")
             sibling_seen.add(rel)
             if rel in seen_headers:
-                raise ValueError(f"ROMFS file header {rel:#x} referenced more than once")
+                if not allow_duplicate_headers:
+                    raise ValueError(f"ROMFS file header {rel:#x} referenced more than once")
+                duplicate = parse_entry(romfs, rel, parent_path)
+                rel = duplicate.next_rel
+                continue
 
             # Parse once with a placeholder so the actual name can define path.
             probe = parse_entry(romfs, rel, parent_path)
@@ -234,170 +249,36 @@ def find_romfs(data: bytes) -> list[int]:
     while True:
         pos = data.find(ROMFS_MAGIC, start)
         if pos < 0:
-            break
+            return found
         found.append(pos)
         start = pos + 1
-    return found
-
-
-def search_ascii(data: bytes, needle: str) -> list[int]:
-    raw = needle.encode("ascii")
-    out: list[int] = []
-    start = 0
-    while True:
-        pos = data.find(raw, start)
-        if pos < 0:
-            break
-        out.append(pos)
-        start = pos + 1
-    return out
-
-
-def safe_output_path(root: Path, romfs_index: int, entry: RomfsEntry) -> Path:
-    parts = [p for p in PurePosixPath(entry.path).parts if p not in ("/", "", ".", "..")]
-    if not parts:
-        parts = [f"header_{entry.header_rel:08x}.bin"]
-    return root / f"romfs_{romfs_index}" / Path(*parts)
-
-
-def print_image(info: RomfsImage) -> None:
-    recorded = "n/a" if info.recorded_size is None else str(info.recorded_size)
-    delta = (
-        "n/a"
-        if info.recorded_size is None
-        else str(info.declared_size - info.recorded_size)
-    )
-    print(f"ROMFS offset       : {info.offset:#010x}")
-    print(f"declared size      : {info.declared_size}")
-    print(f"recorded size      : {recorded}")
-    print(f"declared-recorded  : {delta}")
-    print(f"volume name        : {info.volume_name!r}")
-    print(f"root header rel    : {info.root_header_rel:#010x}")
-    print(f"sha256             : {info.sha256}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("unpacked", type=Path, help="decompressed M11/M11-P firmware image")
-    ap.add_argument(
-        "--scan",
-        action="store_true",
-        help="scan the whole image for ROMFS magic in addition to recorded landmarks",
-    )
-    ap.add_argument(
-        "--search",
-        action="append",
-        default=[],
-        help="raw ASCII string to locate in the decompressed image (repeatable)",
-    )
-    ap.add_argument(
-        "--list-files",
-        action="store_true",
-        help="walk and list structured ROMFS paths at verified landmarks",
-    )
-    ap.add_argument(
-        "--find-file",
-        action="append",
-        default=[],
-        help="find an exact ROMFS basename or absolute path, e.g. r2y.bin (repeatable)",
-    )
-    ap.add_argument(
-        "--extract-found-dir",
-        type=Path,
-        help="extract regular files matched by --find-file under this directory",
-    )
-    ap.add_argument(
-        "--carve-dir",
-        type=Path,
-        help="write whole verified ROMFS images to this directory",
-    )
+    ap.add_argument("firmware", type=Path, help="decompressed M11/M11-P firmware image")
     args = ap.parse_args()
 
-    if args.extract_found_dir and not args.find_file:
-        ap.error("--extract-found-dir requires at least one --find-file")
+    data = args.firmware.read_bytes()
+    print(f"input={args.firmware} bytes={len(data)} sha256={hashlib.sha256(data).hexdigest()}")
+    print(f"all ROMFS magic offsets: {[hex(x) for x in find_romfs(data)]}")
+    print()
 
-    data = args.unpacked.read_bytes()
-    print(f"input: {args.unpacked}")
-    print(f"size : {len(data)} bytes")
-    print(f"sha256: {hashlib.sha256(data).hexdigest()}")
-
-    infos: list[RomfsImage] = []
-    print("\nRecorded landmark verification")
-    for offset, recorded_size in RECORDED_LANDMARKS:
-        try:
-            info = parse_romfs(data, offset, recorded_size)
-        except ValueError as exc:
-            print(f"FAIL {offset:#010x}: {exc}")
-            continue
-        infos.append(info)
-        print("\nPASS")
-        print_image(info)
-
-    if args.scan:
-        print("\nROMFS magic scan")
-        offsets = find_romfs(data)
-        print(f"found {len(offsets)} candidate(s):")
-        for offset in offsets:
-            print(f"  {offset:#010x}")
-
-    for needle in args.search:
-        hits = search_ascii(data, needle)
-        print(f"\nASCII search {needle!r}: {len(hits)} hit(s)")
-        for pos in hits[:100]:
-            print(f"  {pos:#010x}")
-        if len(hits) > 100:
-            print(f"  ... {len(hits) - 100} more")
-
-    if args.carve_dir:
-        args.carve_dir.mkdir(parents=True, exist_ok=True)
-
-    if args.extract_found_dir:
-        args.extract_found_dir.mkdir(parents=True, exist_ok=True)
-
-    for index, info in enumerate(infos, start=1):
-        romfs = data[info.offset : info.offset + info.declared_size]
-
-        if args.carve_dir:
-            out = args.carve_dir / f"m11p_romfs_{index}_{info.offset:08x}.bin"
-            out.write_bytes(romfs)
-            print(f"carved {out}")
-
-        if args.list_files or args.find_file:
-            try:
-                entries = walk_romfs(romfs, info.root_header_rel)
-            except ValueError as exc:
-                print(f"FAIL walking ROMFS #{index} at {info.offset:#x}: {exc}")
-                continue
-
-            if args.list_files:
-                print(f"\nROMFS #{index} file tree ({len(entries)} headers)")
-                for entry in entries:
-                    exec_mark = "x" if entry.executable else "-"
-                    print(
-                        f"{entry.header_rel:#010x} {entry.type_name:9s} {exec_mark} "
-                        f"{entry.size:10d} {entry.path}"
-                    )
-
-            for needle in args.find_file:
-                matches = find_entries(entries, needle)
-                print(f"\nROMFS #{index} structured find {needle!r}: {len(matches)} hit(s)")
-                for entry in matches:
-                    digest = "n/a"
-                    if entry.type_id in (2, 3):
-                        digest = hashlib.sha256(entry_bytes(romfs, entry)).hexdigest()
-                    print(
-                        f"  {entry.path} type={entry.type_name} "
-                        f"header={entry.header_rel:#x} data={entry.data_rel:#x} "
-                        f"size={entry.size} sha256={digest}"
-                    )
-                    if args.extract_found_dir and entry.type_id == 2:
-                        out = safe_output_path(args.extract_found_dir, index, entry)
-                        out.parent.mkdir(parents=True, exist_ok=True)
-                        out.write_bytes(entry_bytes(romfs, entry))
-                        print(f"  extracted {out}")
-
-    if len(infos) != len(RECORDED_LANDMARKS):
-        raise SystemExit(2)
+    for index, (offset, recorded_size) in enumerate(RECORDED_LANDMARKS, start=1):
+        info = parse_romfs(data, offset, recorded_size)
+        romfs = data[offset : offset + info.declared_size]
+        print(
+            f"ROMFS {index}: offset={offset:#x} declared={info.declared_size} "
+            f"recorded={recorded_size} volume={info.volume_name!r} "
+            f"root={info.root_header_rel:#x} sha256={info.sha256}"
+        )
+        entries = walk_romfs(romfs, info.root_header_rel)
+        for entry in entries:
+            print(
+                f"  {entry.path} type={entry.type_name} exec={int(entry.executable)} "
+                f"hdr={entry.header_rel:#x} next={entry.next_rel:#x} spec={entry.spec_info:#x} "
+                f"size={entry.size} data={entry.data_rel:#x} checksum={entry.checksum:#010x}"
+            )
 
 
 if __name__ == "__main__":
