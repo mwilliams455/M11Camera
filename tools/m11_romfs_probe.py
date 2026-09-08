@@ -175,12 +175,12 @@ def walk_romfs(
 
     Directory `spec_info` is the relative offset of its first child. Hard links
     are listed but never recursively followed, avoiding conventional hard-link
-    cycles.  By default, a header referenced from more than one directory chain
+    cycles. By default, a header referenced from more than one directory chain
     remains an error because it can indicate a corrupt parse.
 
     For forensic best-effort ownership scans, ``allow_duplicate_headers=True``
     permits an already-seen header to be skipped while following its encoded
-    sibling pointer.  The duplicate is never emitted twice or recursively
+    sibling pointer. The duplicate is never emitted twice or recursively
     followed, so this mode cannot manufacture additional file payloads.
     """
     root = parse_entry(romfs, root_header_rel, "/")
@@ -202,7 +202,6 @@ def walk_romfs(
                 rel = duplicate.next_rel
                 continue
 
-            # Parse once with a placeholder so the actual name can define path.
             probe = parse_entry(romfs, rel, parent_path)
             path = _join_path(parent_path, probe.name)
             entry = parse_entry(romfs, rel, path)
@@ -248,6 +247,21 @@ def find_romfs(data: bytes) -> list[int]:
     start = 0
     while True:
         pos = data.find(ROMFS_MAGIC, start)
+        if pos < 0:
+            return found
+        found.append(pos)
+        start = pos + 1
+
+
+def search_ascii(data: bytes, needle: str | bytes) -> list[int]:
+    """Return every byte offset where an ASCII needle occurs, including overlaps."""
+    pattern = needle.encode("ascii") if isinstance(needle, str) else needle
+    if not pattern:
+        raise ValueError("needle must not be empty")
+    found: list[int] = []
+    start = 0
+    while True:
+        pos = data.find(pattern, start)
         if pos < 0:
             return found
         found.append(pos)
