@@ -30,6 +30,12 @@ jobs:
             MILB_API
           sparse-checkout-cone-mode: true
 
+      - name: Verify public source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C public-milbeaut rev-parse HEAD)" = 'f5fc84bd5c475f4c15017b7bff749f81c3618287'
+
       - name: Acquire exact hash-gated M11-P updater
         shell: bash
         run: |
@@ -90,6 +96,35 @@ jobs:
           /tmp/gcc-arm/bin/arm-none-eabi-gcc --version | tee /tmp/gcc-version.txt
           grep -q '4.9.3 20150529' /tmp/gcc-version.txt
 
+      - name: Supply compile-only ETK object shim
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The public MILB_API/include/klib.h refers to ../../../fj/klib/src/kobject.h.
+          # That path resolves outside the pinned companyTask repository and the file is
+          # not present in the public commit.  For object fingerprinting we only need
+          # enough ETK object/type declarations to compile the unmodified ImageMacro
+          # translation units.  The target gamma functions do not use object-private
+          # state; calls/addresses are relocation-masked by the matcher.
+          SHIM="$GITHUB_WORKSPACE/fj/klib/src/kobject.h"
+          mkdir -p "$(dirname "$SHIM")"
+          cat >"$SHIM" <<'EOF'
+          #ifndef R2A_COMPILE_ONLY_KOBJECT_H
+          #define R2A_COMPILE_ONLY_KOBJECT_H
+          #include <stddef.h>
+          typedef unsigned long KConstType;
+          typedef struct _KObject { void *opaque; } KObject;
+          #define K_TYPE_CHECK_INSTANCE_CAST(obj, TypeName) ((TypeName *)(obj))
+          #define K_TYPE_CHECK_INSTANCE_TYPE(obj, type_id) (1)
+          #define K_OBJECT_GET_PRIVATE(obj, PrivateType, type_id) ((PrivateType *)0)
+          #define K_TYPE_DEFINE_WITH_PRIVATE(TypeName, type_name)
+          extern void *k_object_new_with_private(KConstType type_id, unsigned long private_size);
+          #endif
+          EOF
+          test -s "$SHIM"
+          realpath "$GITHUB_WORKSPACE/public-milbeaut/MILB_API/include/../../../fj/klib/src/kobject.h"
+          test "$(realpath "$GITHUB_WORKSPACE/public-milbeaut/MILB_API/include/../../../fj/klib/src/kobject.h")" = "$SHIM"
+
       - name: Compile target Milbeaut R2Y objects
         shell: bash
         run: |
@@ -100,10 +135,18 @@ jobs:
           mkdir -p obj dep asm
           PREFIX=/tmp/gcc-arm/bin/arm-none-eabi-
           make GNUarm="$PREFIX" ENABLE_NEON=y PRIORITY_OPTION=fast \
-            obj/imr2yset.o obj/imr2yctrl2.o obj/imr2yutility3.o
-          for o in obj/imr2yset.o obj/imr2yctrl2.o obj/imr2yutility3.o; do
+            obj/imr2yset.o obj/imr2yctrl2.o
+
+          # The public make rules prefix compile recipes with '-', so a compiler error
+          # can otherwise be ignored.  Missing/empty target objects are fatal here.
+          for o in obj/imr2yset.o obj/imr2yctrl2.o; do
+            test -s "$o" || { echo "ERROR: target object not produced: $o" >&2; exit 1; }
+            "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
+          done
+
+          for o in obj/imr2yset.o obj/imr2yctrl2.o; do
             echo "===== $o ====="
-            "$PREFIX"nm -S --size-sort "$o" | grep -Ei 'gamma|r2y_set_gamma|r2y_ctrl2_gamma|utility' || true
+            "$PREFIX"nm -S --size-sort "$o" | grep -Ei 'gamma|r2y_set_gamma|r2y_ctrl2_gamma' || true
             "$PREFIX"objdump -dr "$o" | grep -Ei -A12 -B4 'gamma|set_gamma|ctrl2_gamma' | head -n 400 || true
           done | tee /tmp/milbeaut-build-summary.txt
 
