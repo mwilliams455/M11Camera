@@ -22,6 +22,8 @@ on:
       - 'tools/trace_m11_object_static_initializer.py'
       - 'tools/trace_m11_scalar_subtype_semantics.py'
       - 'tools/trace_m11_gamma_entry_consumers.py'
+      - 'tools/trace_m11_gamma_request_abi.py'
+      - 'tools/trace_m11_bb06_gamma_request_producers.py'
       - 'tools/trace_m11_r2y_master_dispatch.py'
       - 'tools/trace_m11_gamma_codeptr_base.py'
       - 'tools/trace_m11_serializer_scalar_builders.py'
@@ -94,7 +96,7 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace exact gamma flow, object model, dispatch and transport
+      - name: Trace exact gamma flow, request ABI, producers, object model and dispatch
         shell: bash
         run: |
           set -euo pipefail
@@ -116,13 +118,15 @@ jobs:
           python tools/trace_m11_object_static_initializer.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_static_initializer.md
           python tools/trace_m11_scalar_subtype_semantics.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/scalar_subtype_semantics.md
           python tools/trace_m11_gamma_entry_consumers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_entry_consumers.md
+          python tools/trace_m11_gamma_request_abi.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_request_abi.md
+          python tools/trace_m11_bb06_gamma_request_producers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/bb06_gamma_request_producers.md
           python tools/trace_m11_r2y_master_dispatch.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/r2y_master_dispatch.md
           python tools/trace_m11_gamma_codeptr_base.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_codeptr_base.md
           python tools/trace_m11_serializer_scalar_builders.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/serializer_scalar_builders.md
           python tools/trace_m11_gamma_subtype_blocks.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
+          cat /tmp/r2a-gamma-flow/gamma_request_abi.md
+          cat /tmp/r2a-gamma-flow/bb06_gamma_request_producers.md
           cat /tmp/r2a-gamma-flow/r2y_master_dispatch.md
-          cat /tmp/r2a-gamma-flow/gamma_entry_consumers.md
-          cat /tmp/r2a-gamma-flow/object_static_initializer.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
