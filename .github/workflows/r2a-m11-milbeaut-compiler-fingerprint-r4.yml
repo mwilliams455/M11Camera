@@ -7,6 +7,7 @@ on:
       - '.github/workflows/r2a-m11-milbeaut-compiler-fingerprint-r4.yml'
       - 'tools/prepare_milbeaut_r2y_compile.py'
       - 'tools/match_milbeaut_object_fingerprints.py'
+      - 'tools/match_milbeaut_object_fingerprints_v2.py'
   workflow_dispatch:
 
 permissions:
@@ -97,6 +98,7 @@ jobs:
             grep -E -m 160 'fatal error:|(^|[[:space:]])error:|undefined reference|No such file or directory' /tmp/r2a/compile.log || true
           } > /tmp/r2a/compile-errors.txt
           cat /tmp/r2a/compile-errors.txt
+          test "$MAKE_RC" -eq 0
           for o in obj/imr2yset.o obj/imr2yctrl2.o; do
             test -s "$o" || { echo "ERROR: target object not produced: $o" >&2; exit 1; }
             "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
@@ -176,7 +178,7 @@ jobs:
       - name: Install fingerprint dependencies
         run: python -m pip install --quiet pyelftools capstone
 
-      - name: Match relocation-free object fingerprints to M11
+      - name: Match prefix and sliding direct-register fingerprints to M11
         shell: bash
         run: |
           set -euo pipefail
@@ -185,8 +187,14 @@ jobs:
             /tmp/M11P.bin \
             "$SRC/imr2yset.o" \
             "$SRC/imr2yctrl2.o" \
-            --output /tmp/r2a/milbeaut_object_fingerprints.md
-          cat /tmp/r2a/milbeaut_object_fingerprints.md
+            --output /tmp/r2a/milbeaut_object_fingerprints_prefix.md
+          python tools/match_milbeaut_object_fingerprints_v2.py \
+            /tmp/M11P.bin \
+            "$SRC/imr2yset.o" \
+            "$SRC/imr2yctrl2.o" \
+            --output /tmp/r2a/milbeaut_object_fingerprints_sliding.md
+          cat /tmp/r2a/milbeaut_object_fingerprints_prefix.md
+          cat /tmp/r2a/milbeaut_object_fingerprints_sliding.md
           cp /tmp/gcc-version.txt /tmp/r2a/gcc-version.txt
 
       - name: Upload derived reports only
