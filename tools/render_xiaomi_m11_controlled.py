@@ -328,7 +328,9 @@ def decode_camera_rgb(path: Path, decode_scale: str) -> tuple[np.ndarray, dict[s
             "user_wb": [1.0, 1.0, 1.0, 1.0],
             "output_color": rawpy.ColorSpace.raw,
             "output_bps": 16,
+            "no_auto_scale": False,
             "no_auto_bright": True,
+            "adjust_maximum_thr": 0.0,
             "bright": 1.0,
             "highlight_mode": rawpy.HighlightMode.Clip,
             "gamma": (1.0, 1.0),
@@ -359,10 +361,14 @@ def decode_camera_rgb(path: Path, decode_scale: str) -> tuple[np.ndarray, dict[s
             "white_balance": "unity [1,1,1,1]; DNG live neutral is applied only by source transform",
             "gamma": [1.0, 1.0],
             "auto_bright": False,
+            "auto_scale": True,
+            "adjust_maximum_thr": 0.0,
+            "content_dependent_maximum_adjustment": False,
             "highlight_mode": "Clip; no highlight reconstruction",
             "normalization_policy": (
-                "LibRaw black/white scaling to 16-bit output using DNG/raw metadata; "
-                "camera colour conversion disabled"
+                "LibRaw black subtraction plus deterministic theoretical sensor-maximum scaling "
+                "to 16-bit output; content-dependent maximum adjustment disabled; camera colour "
+                "conversion disabled"
             ),
             "raw_sizes": _namedtuple_dict(sizes),
             "raw_pattern": raw_pattern,
