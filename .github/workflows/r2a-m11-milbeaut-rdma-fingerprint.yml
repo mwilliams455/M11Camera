@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/r2a-m11-milbeaut-rdma-fingerprint.yml'
       - 'tools/prepare_milbeaut_r2y_compile.py'
+      - 'tools/prepare_milbeaut_r2y_rdma_compile.py'
       - 'tools/match_milbeaut_object_fingerprints.py'
   workflow_dispatch:
 
@@ -59,11 +60,12 @@ jobs:
           /tmp/gcc-arm/bin/arm-none-eabi-gcc --version | tee /tmp/gcc-version.txt
           grep -q '4.9.3 20150529' /tmp/gcc-version.txt
 
-      - name: Apply exact generated-header compile bridge
+      - name: Apply exact generated-header and RDMA refactor bridges
         shell: bash
         run: |
           set -euo pipefail
           python tools/prepare_milbeaut_r2y_compile.py public-milbeaut/MILB_API | tee /tmp/bridge.log
+          python tools/prepare_milbeaut_r2y_rdma_compile.py public-milbeaut/MILB_API | tee /tmp/rdma-bridge.log
 
       - name: Compile exact RDMA gamma variant
         shell: bash
@@ -90,6 +92,7 @@ jobs:
             grep -E -m 200 'fatal error:|(^|[[:space:]])error:|undefined reference|No such file or directory' /tmp/r2a/compile.log || true
           } > /tmp/r2a/compile-errors.txt
           cat /tmp/r2a/compile-errors.txt
+          test "$MAKE_RC" -eq 0
           for o in obj/imr2yset.o obj/imr2yctrl2.o; do
             test -s "$o" || { echo "ERROR: target object not produced: $o" >&2; exit 1; }
             "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
@@ -114,6 +117,7 @@ jobs:
             /tmp/r2a/compile.log
             /tmp/r2a/milbeaut-build-summary.txt
             /tmp/bridge.log
+            /tmp/rdma-bridge.log
             /tmp/gcc-version.txt
           retention-days: 14
           if-no-files-found: warn
