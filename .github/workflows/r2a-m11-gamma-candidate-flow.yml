@@ -10,6 +10,7 @@ on:
       - 'tools/trace_m11_bb06_packet_submit.py'
       - 'tools/trace_m11_bb06_packet_submit_v2.py'
       - 'tools/trace_m11_gamma_helper_calls.py'
+      - 'tools/trace_m11_submit_transport.py'
   workflow_dispatch:
 
 permissions:
@@ -78,7 +79,7 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace exact gamma candidate flow, dispatch, packets and helper semantics
+      - name: Trace exact gamma candidate flow, dispatch, packets, helpers and transport
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +99,11 @@ jobs:
           python tools/trace_m11_gamma_helper_calls.py \
             /tmp/M11P.bin \
             --output /tmp/r2a-gamma-flow/gamma_helper_calls.md
+          python tools/trace_m11_submit_transport.py \
+            /tmp/M11P.bin \
+            --output /tmp/r2a-gamma-flow/submit_transport.md
           cat /tmp/r2a-gamma-flow/gamma_helper_calls.md
+          cat /tmp/r2a-gamma-flow/submit_transport.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
