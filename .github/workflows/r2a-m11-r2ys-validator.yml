@@ -7,6 +7,7 @@ on:
       - '.github/workflows/r2a-m11-r2ys-validator.yml'
       - 'tools/trace_m11_r2ys_marker_parser.py'
       - 'tools/trace_m11_r2ys_validator_registration.py'
+      - 'tools/trace_m11_r2ys_validator_branch_xrefs.py'
   workflow_dispatch:
 
 permissions:
@@ -67,13 +68,15 @@ jobs:
           test "$(stat -c%s /tmp/M11P.bin)" = '97644400'
           echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P.bin' | sha256sum -c -
       - run: python -m pip install --quiet capstone
-      - name: Trace R2YS validator registration
+      - name: Trace R2YS validator registration and static branch xrefs
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/r2ys-validator
           python tools/trace_m11_r2ys_marker_parser.py /tmp/M11P.bin --output /tmp/r2ys-validator/r2ys_marker_parser.md
           python tools/trace_m11_r2ys_validator_registration.py /tmp/M11P.bin --output /tmp/r2ys-validator/r2ys_validator_registration.md
+          python tools/trace_m11_r2ys_validator_branch_xrefs.py /tmp/M11P.bin --output /tmp/r2ys-validator/r2ys_validator_branch_xrefs.md
+          cat /tmp/r2ys-validator/r2ys_validator_branch_xrefs.md
           cat /tmp/r2ys-validator/r2ys_validator_registration.md
       - uses: actions/upload-artifact@v4
         with:
