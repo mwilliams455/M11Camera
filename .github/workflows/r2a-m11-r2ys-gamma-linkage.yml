@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/r2a-m11-r2ys-gamma-linkage.yml'
       - 'tools/trace_m11_r2ys_gamma_linkage.py'
+      - 'tools/trace_m11_r2ys_parser_candidates.py'
   workflow_dispatch:
 
 permissions:
@@ -73,13 +74,15 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace Cat15 Cat20 linkage
+      - name: Trace Cat15 Cat20 linkage and dynamic R2YS parser candidates
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/r2a-r2ys-gamma
           python tools/trace_m11_r2ys_gamma_linkage.py /tmp/M11P.bin --output /tmp/r2a-r2ys-gamma/r2ys_gamma_linkage.md
+          python tools/trace_m11_r2ys_parser_candidates.py /tmp/M11P.bin --output /tmp/r2a-r2ys-gamma/r2ys_parser_candidates.md
           cat /tmp/r2a-r2ys-gamma/r2ys_gamma_linkage.md
+          cat /tmp/r2a-r2ys-gamma/r2ys_parser_candidates.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
