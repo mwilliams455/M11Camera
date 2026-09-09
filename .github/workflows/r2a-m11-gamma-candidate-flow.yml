@@ -25,6 +25,7 @@ on:
       - 'tools/trace_m11_gamma_request_abi.py'
       - 'tools/trace_m11_bb06_gamma_request_producers.py'
       - 'tools/trace_m11_r2y_master_dispatch.py'
+      - 'tools/trace_m11_r2y_dispatch_callers.py'
       - 'tools/trace_m11_gamma_codeptr_base.py'
       - 'tools/trace_m11_serializer_scalar_builders.py'
       - 'tools/trace_m11_gamma_subtype_blocks.py'
@@ -121,9 +122,11 @@ jobs:
           python tools/trace_m11_gamma_request_abi.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_request_abi.md
           python tools/trace_m11_bb06_gamma_request_producers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/bb06_gamma_request_producers.md
           python tools/trace_m11_r2y_master_dispatch.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/r2y_master_dispatch.md
+          python tools/trace_m11_r2y_dispatch_callers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/r2y_dispatch_callers.md
           python tools/trace_m11_gamma_codeptr_base.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_codeptr_base.md
           python tools/trace_m11_serializer_scalar_builders.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/serializer_scalar_builders.md
           python tools/trace_m11_gamma_subtype_blocks.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
+          cat /tmp/r2a-gamma-flow/r2y_dispatch_callers.md
           cat /tmp/r2a-gamma-flow/gamma_request_abi.md
           cat /tmp/r2a-gamma-flow/bb06_gamma_request_producers.md
           cat /tmp/r2a-gamma-flow/r2y_master_dispatch.md
