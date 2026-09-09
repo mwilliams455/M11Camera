@@ -1,0 +1,195 @@
+name: R2A M11 Milbeaut RDMA gamma fingerprint
+
+on:
+  push:
+    branches: [research/m11-r0-evidence-input-space]
+    paths:
+      - '.github/workflows/r2a-m11-milbeaut-rdma-fingerprint.yml'
+      - 'tools/prepare_milbeaut_r2y_compile.py'
+      - 'tools/match_milbeaut_object_fingerprints.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout M11 research
+        uses: actions/checkout@v4
+
+      - name: Checkout exact public Milbeaut source sparsely
+        uses: actions/checkout@v4
+        with:
+          repository: ZMlogicL/companyTask
+          ref: f5fc84bd5c475f4c15017b7bff749f81c3618287
+          path: public-milbeaut
+          fetch-depth: 1
+          sparse-checkout: |
+            MILB_API
+          sparse-checkout-cone-mode: true
+
+      - name: Verify public source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C public-milbeaut rev-parse HEAD)" = 'f5fc84bd5c475f4c15017b7bff749f81c3618287'
+
+      - name: Install exact ARM Embedded GCC 4.9 Q3 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_md5='8a4a74872830f80c788c944877d3ad8c'
+          tarball=/tmp/gcc-arm.tar.bz2
+          rm -f "$tarball"
+          verify() { [ -s "$tarball" ] && [ "$(md5sum "$tarball" | awk '{print $1}')" = "$expected_md5" ]; }
+          for url in \
+            'https://downloads.sourceforge.net/project/t-kernel/gcc-4.9-2015-q3-update/gcc-arm-none-eabi-4_9-2015q3-20150921-linux.tar.bz2' \
+            'https://launchpad.net/gcc-arm-embedded/4.9/4.9-2015-q3-update/+download/gcc-arm-none-eabi-4_9-2015q3-20150921-linux.tar.bz2'; do
+            rm -f "$tarball"
+            curl -L --fail --retry 2 --retry-all-errors --connect-timeout 20 --max-time 180 -o "$tarball" "$url" || true
+            if verify; then break; fi
+          done
+          verify
+          echo "$expected_md5  $tarball" | md5sum -c -
+          mkdir -p /tmp/gcc-arm
+          tar -xjf "$tarball" -C /tmp/gcc-arm --strip-components=1
+          /tmp/gcc-arm/bin/arm-none-eabi-gcc --version | tee /tmp/gcc-version.txt
+          grep -q '4.9.3 20150529' /tmp/gcc-version.txt
+
+      - name: Apply exact generated-header compile bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/prepare_milbeaut_r2y_compile.py public-milbeaut/MILB_API | tee /tmp/bridge.log
+
+      - name: Compile exact RDMA gamma variant
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/r2a
+          SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/ImageMacro"
+          cd "$SRC"
+          rm -rf obj dep asm
+          mkdir -p obj dep asm
+          PREFIX=/tmp/gcc-arm/bin/arm-none-eabi-
+          DEFINES='-DCO_DDIM_UTILITY_USE -DCO_R2Y_RDMA_ON'
+          set +e
+          make GNUarm="$PREFIX" ENABLE_NEON=y PRIORITY_OPTION=fast \
+            MILB_COMMON_OPT="$DEFINES" \
+            obj/imr2yset.o obj/imr2yctrl2.o 2>&1 | tee /tmp/r2a/compile.log
+          MAKE_RC=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "make_rc=$MAKE_RC"
+            echo "compiler=$(${PREFIX}gcc --version | head -n1)"
+            echo "defines=$DEFINES"
+            echo
+            grep -E -m 200 'fatal error:|(^|[[:space:]])error:|undefined reference|No such file or directory' /tmp/r2a/compile.log || true
+          } > /tmp/r2a/compile-errors.txt
+          cat /tmp/r2a/compile-errors.txt
+          for o in obj/imr2yset.o obj/imr2yctrl2.o; do
+            test -s "$o" || { echo "ERROR: target object not produced: $o" >&2; exit 1; }
+            "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
+          done
+          {
+            for o in obj/imr2yset.o obj/imr2yctrl2.o; do
+              echo "===== $o ====="
+              "$PREFIX"nm -S --size-sort "$o" | grep -Ei 'gamma|gammma|rdmaval' || true
+            done
+          } | tee /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'imR2ySetRdmaValGammmaDiffTable' /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'imR2ySetRdmaValGammmaFullTable' /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'imR2ySetRdmaValGammaCtrl' /tmp/r2a/milbeaut-build-summary.txt
+
+      - name: Upload compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-milbeaut-rdma-compile-diagnostics
+          path: |
+            /tmp/r2a/compile-errors.txt
+            /tmp/r2a/compile.log
+            /tmp/r2a/milbeaut-build-summary.txt
+            /tmp/bridge.log
+            /tmp/gcc-version.txt
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Acquire exact hash-gated M11-P updater after compiler success
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/154.0 Safari/537.36'
+          expected_size='63621633'
+          expected_sha='0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83'
+          out=/tmp/LEICA_M11-P_2.6.1.FW
+          verify() { [ -f "$out" ] && [ "$(stat -c%s "$out")" = "$expected_size" ] && [ "$(sha256sum "$out"|awk '{print $1}')" = "$expected_sha" ]; }
+          rm -f "$out"
+          for url in \
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW' \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'; do
+            curl --http1.1 -L --fail --retry 1 --retry-all-errors -A "$ua" \
+              -e 'https://leica-camera.com/en-GB/photography/cameras/m/m11-p-black/downloads' \
+              --connect-timeout 20 --max-time 180 -o "$out" "$url" || true
+            if verify; then break; fi
+          done
+          if ! verify; then
+            popup='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+            curl --http1.1 -L --fail -A "$ua" --connect-timeout 20 --max-time 60 -o /tmp/tld.html "$popup"
+            python - <<'PY' >/tmp/tld_urls.txt
+          import re
+          from pathlib import Path
+          from html import unescape
+          from urllib.parse import urljoin
+          base='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+          t=Path('/tmp/tld.html').read_text(errors='replace'); out=[]
+          for raw in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''',t,re.I):
+              u=urljoin(base,unescape(raw)); l=u.lower()
+              if ('fichiers.touslesdrivers.com' in l or 'leica-camera.com' in l) and ('84657' in l or '.fw' in l) and u not in out:
+                  out.append(u)
+          print('\n'.join(out))
+          PY
+            while IFS= read -r url; do
+              [ -n "$url" ] || continue
+              rm -f "$out"
+              curl --http1.1 -L --fail -A "$ua" -e "$popup" --connect-timeout 20 --max-time 180 -o "$out" "$url" || true
+              if verify; then break; fi
+            done </tmp/tld_urls.txt
+          fi
+          verify
+          echo "$expected_sha  $out" | sha256sum -c -
+
+      - name: Decompress and verify exact image
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/decompress_m11.py /tmp/LEICA_M11-P_2.6.1.FW -o /tmp/M11P.bin
+          test "$(stat -c%s /tmp/M11P.bin)" = '97644400'
+          echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P.bin' | sha256sum -c -
+
+      - name: Install fingerprint dependencies
+        run: python -m pip install --quiet pyelftools capstone
+
+      - name: Match relocation-free RDMA object fingerprints to M11
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="$GITHUB_WORKSPACE/public-milbeaut/MILB_API/Project/ImageMacro/obj"
+          python tools/match_milbeaut_object_fingerprints.py \
+            /tmp/M11P.bin \
+            "$SRC/imr2yset.o" \
+            "$SRC/imr2yctrl2.o" \
+            --output /tmp/r2a/milbeaut_rdma_object_fingerprints.md
+          cat /tmp/r2a/milbeaut_rdma_object_fingerprints.md
+          cp /tmp/gcc-version.txt /tmp/r2a/gcc-version.txt
+
+      - name: Upload derived reports only
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-milbeaut-rdma-fingerprint
+          path: /tmp/r2a/*
+          retention-days: 14
+          if-no-files-found: error
