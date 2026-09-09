@@ -1,0 +1,79 @@
+{
+  "schema": "m11camera.xiaomi.sourcecal.live.v1.main",
+  "date": "2026-09-09",
+  "source": {
+    "project_lineage": "M9Camera_refresh SOURCECAL2A_CMFIX diagnostic sidecar from the same Xiaomi 15 Ultra device",
+    "sidecar_name": "IMG_20260909_081117_1788937877660_00_M9_SOURCECAL1A.json",
+    "capture_dng_name": "IMG_20260909_081117_1788937877660_00.dng",
+    "scope": "read-only reuse as current Xiaomi source-characterization evidence for M11 input validation"
+  },
+  "physical_capture": {
+    "requested_physical_camera_id": "2",
+    "capture_result_camera_id": "2",
+    "capture_result_matches_requested_physical_camera": true,
+    "focal_length_mm": 8.720000267028809,
+    "aperture": 1.6299999952316284,
+    "iso": 50,
+    "exposure_time_seconds": 0.001258265,
+    "cfa_pattern_code": 0,
+    "white_level": 1023,
+    "black_level": [64, 64, 64, 64]
+  },
+  "live_camera2_characteristics": {
+    "reference_illuminant1": 21,
+    "reference_illuminant2": 17,
+    "calibration_transform1": [
+      [1.03125, 0.0, 0.0],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.015625]
+    ],
+    "calibration_transform2": [
+      [1.03125, 0.0, 0.0],
+      [0.0, 1.0, 0.0],
+      [0.0, 0.0, 1.015625]
+    ],
+    "color_matrix1": [
+      [0.8359375, -0.171875, -0.1328125],
+      [-0.46875, 1.3984375, 0.046875],
+      [-0.0859375, 0.3359375, 0.40625]
+    ],
+    "color_matrix2": [
+      [1.28125, -0.484375, -0.2265625],
+      [-0.5859375, 1.59375, 0.140625],
+      [-0.046875, 0.1796875, 0.703125]
+    ],
+    "forward_matrix1": [
+      [0.6328125, 0.109375, 0.21875],
+      [0.21875, 0.7578125, 0.0234375],
+      [-0.0390625, -0.453125, 1.3203125]
+    ],
+    "forward_matrix2": [
+      [0.6328125, 0.109375, 0.21875],
+      [0.21875, 0.7578125, 0.0234375],
+      [-0.0390625, -0.453125, 1.3203125]
+    ],
+    "sensor_neutral_color_point": [0.32421875, 1.0, 0.62109375],
+    "dual_illuminant_metadata_complete": true
+  },
+  "sourcecal2a_result": {
+    "color_matrix_normalization": "none_preserve_DNG_XYZ_to_reference_camera",
+    "forward_matrix_normalization": "D50_forward_matrix_only",
+    "interpolation_factor": 0.00006103515625,
+    "sensor_to_xyz_d50": [
+      [1.9584339, 0.10974634, 0.353397],
+      [0.6746988, 0.7578125, 0.03773585],
+      [-0.12001274, -0.45136034, 2.1175075]
+    ],
+    "active_metadata_differs_from_native": false
+  },
+  "slot_semantics": {
+    "android_camera2_contract": "SENSOR_COLOR_TRANSFORM1 / CALIBRATION_TRANSFORM1 / FORWARD_MATRIX1 correspond to SENSOR_REFERENCE_ILLUMINANT1; slot 2 corresponds to reference illuminant2",
+    "android_dngcreator_contract": "Camera2 transform slot 1 is written to DNG ColorMatrix1/CameraCalibration1/ForwardMatrix1 and slot 2 to the corresponding DNG *2 tags",
+    "consequence": "For this device the directly observed slot association is CM1 with illuminant 21 (D65) and CM2 with illuminant 17 (Standard Light A).",
+    "historical_label_correction": "The earlier M9 static forensics file carried the same two matrix values but named the 1.28125... matrix D65 and the 0.8359375... matrix A. Current direct slot evidence plus the Android contract show those semantic labels were reversed; the numerical matrices themselves were stable."
+  },
+  "rendering_impact": {
+    "current_main_sensor": "No change to the final SOURCECAL2A camera-to-XYZ-D50 transform for this capture because ForwardMatrix1 == ForwardMatrix2 and CalibrationTransform1 == CalibrationTransform2. The ColorMatrix pair affects the estimated interpolation coordinate, not the final forward transform in this degenerate equal-forward-matrix case.",
+    "future_lenses_or_metadata": "Slot association must be preserved exactly. A lens with unequal forward/calibration endpoints could produce a real colour error if semantic labels are swapped."
+  }
+}
