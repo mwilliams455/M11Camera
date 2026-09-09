@@ -1,28 +1,52 @@
 {
   "schema": "m11camera.xiaomi.source_characterization.v1.main",
-  "evidence_class": "reused_prior_xiaomi_source_audit_not_yet_recaptured_in_m11camera",
+  "evidence_class": "historical_static_audit_plus_live_camera2_revalidation_20260909",
   "source_lineage": {
-    "repository": "mwilliams455/M9Camera_refresh",
-    "branch": "m9sourcecal2a-nativeprospective1a-reviewfix1",
-    "file": "forensics/XIAOMI_MAIN_NATIVE_VS_COBALT_SOURCECAL_v1.json"
+    "historical_repository": "mwilliams455/M9Camera_refresh",
+    "historical_branch": "m9sourcecal2a-nativeprospective1a-reviewfix1",
+    "historical_file": "forensics/XIAOMI_MAIN_NATIVE_VS_COBALT_SOURCECAL_v1.json",
+    "live_revalidation_file": "research/xiaomi/xiaomi15ultra_main_sourcecal_live_20260909.json"
   },
   "camera": "Xiaomi 15 Ultra rear wide/main RAW physical camera",
   "historical_corpus": "12 Open Camera DNGs from the fixed M9 regression/capture corpus",
-  "stability_observation": "ColorMatrix1/2, CameraCalibration1/2 and ForwardMatrix1/2 were identical across all 12 inspected DNGs; AsShotNeutral varied by scene",
+  "live_revalidation": "2026-09-09 SOURCECAL2A_CMFIX sidecar with requested physical camera 2 == capture-result camera 2 at 8.72 mm",
+  "stability_observation": "The same two ColorMatrix values and the same ForwardMatrix values remain present in current live Camera2 characteristics. The earlier semantic A/D65 labels on the ColorMatrix pair were reversed; slot association is now authoritative.",
   "calibration_illuminants": {
     "1": {"name": "D65", "dng_code": 21},
     "2": {"name": "Standard Light A", "dng_code": 17}
   },
   "color_matrix_convention": "DNG XYZ_to_reference_camera; do_not_ForwardMatrix_normalize",
-  "color_matrix_d65": [
+  "color_matrix_slot1_d65": [
+    [0.8359375, -0.171875, -0.1328125],
+    [-0.46875, 1.3984375, 0.046875],
+    [-0.0859375, 0.3359375, 0.40625]
+  ],
+  "color_matrix_slot2_A": [
     [1.28125, -0.484375, -0.2265625],
     [-0.5859375, 1.59375, 0.140625],
     [-0.046875, 0.1796875, 0.703125]
   ],
-  "color_matrix_A": [
+  "color_matrix_d65": [
     [0.8359375, -0.171875, -0.1328125],
     [-0.46875, 1.3984375, 0.046875],
     [-0.0859375, 0.3359375, 0.40625]
+  ],
+  "color_matrix_A": [
+    [1.28125, -0.484375, -0.2265625],
+    [-0.5859375, 1.59375, 0.140625],
+    [-0.046875, 0.1796875, 0.703125]
+  ],
+  "historical_label_correction": {
+    "previous_color_matrix_d65_label": "1.28125... matrix",
+    "previous_color_matrix_A_label": "0.8359375... matrix",
+    "correction_basis": "Current direct Camera2 evidence reports referenceIlluminant1=21 with ColorMatrix1=0.8359375... and referenceIlluminant2=17 with ColorMatrix2=1.28125.... Android Camera2 defines transform slot 1 as belonging to illuminant slot 1 and slot 2 to illuminant slot 2; Android DngCreator preserves those slots when writing DNG tags.",
+    "numerical_values_changed": false,
+    "semantic_slot_labels_changed": true
+  },
+  "calibration_transform_both_illuminants_live": [
+    [1.03125, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.015625]
   ],
   "forward_matrix_raw_both_illuminants": [
     [0.6328125, 0.109375, 0.21875],
@@ -45,7 +69,9 @@
     "forward_matrix_normalization": true,
     "additional_white_balance_diagonal_after_native_transform": false,
     "cobalt_required": false,
-    "lens_shading_part_of_color_matrix": false
+    "lens_shading_part_of_color_matrix": false,
+    "preserve_illuminant_matrix_slot_association": true
   },
-  "scope_warning": "Values are historical main-camera evidence only. Re-capture/verify on current Xiaomi 15 Ultra and independently characterize tele, super-tele and ultra-wide physical cameras."
+  "current_main_rendering_impact": "The corrected ColorMatrix semantic labels do not change the current main-sensor SOURCECAL2A final camera-to-XYZ-D50 transform when ForwardMatrix1 == ForwardMatrix2 and CalibrationTransform1 == CalibrationTransform2. They do correct interpolation/CCT interpretation and prevent a future unequal-endpoint lens from being wired backwards.",
+  "scope_warning": "Main-camera source characterization only. Tele, super-tele and ultra-wide physical cameras still require independent controlled characterization before reuse."
 }
