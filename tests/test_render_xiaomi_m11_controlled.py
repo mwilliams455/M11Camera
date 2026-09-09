@@ -10,6 +10,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "tools" / "render_xiaomi_m11_controlled.py"
+LIVE_MAIN = ROOT / "research" / "xiaomi" / "xiaomi15ultra_main_sourcecal_live_20260909.json"
 spec = importlib.util.spec_from_file_location("render_xiaomi_m11_controlled", MODULE_PATH)
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
@@ -34,6 +35,28 @@ class ControlledXiaomiM11RunnerTests(unittest.TestCase):
             "EXIF:ExposureTime": 0.01,
             "EXIF:FNumber": 1.63,
             "EXIF:FocalLength": 8.72,
+        }
+
+    def _live_record(self):
+        live = json.loads(LIVE_MAIN.read_text())
+        chars = live["live_camera2_characteristics"]
+        physical = live["physical_capture"]
+        return {
+            "EXIF:AsShotNeutral": chars["sensor_neutral_color_point"],
+            "EXIF:CalibrationIlluminant1": chars["reference_illuminant1"],
+            "EXIF:CalibrationIlluminant2": chars["reference_illuminant2"],
+            "EXIF:CameraCalibration1": chars["calibration_transform1"],
+            "EXIF:CameraCalibration2": chars["calibration_transform2"],
+            "EXIF:ColorMatrix1": chars["color_matrix1"],
+            "EXIF:ColorMatrix2": chars["color_matrix2"],
+            "EXIF:ForwardMatrix1": chars["forward_matrix1"],
+            "EXIF:ForwardMatrix2": chars["forward_matrix2"],
+            "EXIF:BlackLevel": physical["black_level"],
+            "EXIF:WhiteLevel": physical["white_level"],
+            "EXIF:ISO": physical["iso"],
+            "EXIF:ExposureTime": physical["exposure_time_seconds"],
+            "EXIF:FNumber": physical["aperture"],
+            "EXIF:FocalLength": physical["focal_length_mm"],
         }
 
     def test_parse_numbers_accepts_rational_strings(self):
@@ -65,6 +88,28 @@ class ControlledXiaomiM11RunnerTests(unittest.TestCase):
         self.assertLessEqual(result.interpolation_factor, 1.0)
         self.assertTrue(diag["live_neutral_white_balance_folded_into_transform"])
         self.assertFalse(diag["additional_downstream_source_wb"])
+
+    def test_live_sourcecal2a_parity_20260909(self):
+        """Offline Python must reproduce the current device-side SOURCECAL2A solve."""
+        live = json.loads(LIVE_MAIN.read_text())
+        expected = live["sourcecal2a_result"]
+        meta = module.parse_dng_metadata(self._live_record())
+        result, _ = module.build_source_transform(meta)
+
+        self.assertAlmostEqual(
+            result.interpolation_factor,
+            expected["interpolation_factor"],
+            places=15,
+        )
+        np.testing.assert_allclose(
+            result.camera_to_xyz_d50,
+            np.asarray(expected["sensor_to_xyz_d50"], dtype=np.float64),
+            rtol=0.0,
+            atol=2.0e-7,
+        )
+
+        comparison = module.compare_historical_main(meta)
+        self.assertTrue(comparison["historical_main_characterization_match"])
 
     def test_reference_bridge_remains_xiaomi_independent(self):
         historical = json.loads(module.HISTORICAL_MAIN.read_text())
