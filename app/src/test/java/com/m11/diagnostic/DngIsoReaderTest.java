@@ -37,6 +37,42 @@ public final class DngIsoReaderTest {
     }
 
     @Test
+    public void resolves65535SentinelUsingSelectedIsoSpeedTag() throws Exception {
+        DngIsoReader.Result r = readHighIsoFixture(ByteOrder.LITTLE_ENDIAN, 3,
+                -1, -1, 102400);
+        assertTrue(r.present());
+        assertEquals(102400, r.iso);
+        assertEquals("ISOSpeed", r.sourceName());
+    }
+
+    @Test
+    public void resolvesAllSelectedHighIsoTagsOnlyWhenTheyAgree() throws Exception {
+        DngIsoReader.Result r = readHighIsoFixture(ByteOrder.BIG_ENDIAN, 7,
+                102400, 102400, 102400);
+        assertTrue(r.present());
+        assertEquals(102400, r.iso);
+        assertEquals("StandardOutputSensitivity", r.sourceName());
+    }
+
+    @Test
+    public void rejectsDisagreeingHighIsoTagsInsteadOfGuessingCc1Band() throws Exception {
+        DngIsoReader.Result r = readHighIsoFixture(ByteOrder.LITTLE_ENDIAN, 7,
+                102400, 128000, 102400);
+        assertFalse(r.present());
+        assertEquals(-1, r.iso);
+        assertTrue(r.sourceName().contains("ambiguous"));
+    }
+
+    @Test
+    public void rejects65535SentinelWhenExtendedTagIsMissing() throws Exception {
+        DngIsoReader.Result r = readHighIsoFixture(ByteOrder.LITTLE_ENDIAN, 3,
+                -1, -1, -1);
+        assertFalse(r.present());
+        assertEquals(-1, r.iso);
+        assertTrue(r.sourceName().contains("unresolved"));
+    }
+
+    @Test
     public void missingIsoReturnsExplicitNoEvidence() throws Exception {
         byte[] bytes = classicTiffHeader(ByteOrder.LITTLE_ENDIAN, 8, 32);
         ByteBuffer b = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
@@ -65,6 +101,31 @@ public final class DngIsoReaderTest {
             putShortEntry(b, 34855, iso);
             b.putInt(0);
         }
+        return read(bytes);
+    }
+
+    private static DngIsoReader.Result readHighIsoFixture(ByteOrder order, int sensitivityType,
+                                                           int standard, int recommended,
+                                                           int isoSpeed) throws Exception {
+        byte[] bytes = classicTiffHeader(order, 8, 256);
+        ByteBuffer b = ByteBuffer.wrap(bytes).order(order);
+        b.position(8);
+        b.putShort((short) 1);
+        putLongEntry(b, 34665, 64);
+        b.putInt(0);
+
+        int entryCount = 2;
+        if (standard > 0) entryCount++;
+        if (recommended > 0) entryCount++;
+        if (isoSpeed > 0) entryCount++;
+        b.position(64);
+        b.putShort((short) entryCount);
+        putShortEntry(b, 34855, 65535);
+        putShortEntry(b, 34864, sensitivityType);
+        if (standard > 0) putLongEntry(b, 34865, standard);
+        if (recommended > 0) putLongEntry(b, 34866, recommended);
+        if (isoSpeed > 0) putLongEntry(b, 34867, isoSpeed);
+        b.putInt(0);
         return read(bytes);
     }
 
