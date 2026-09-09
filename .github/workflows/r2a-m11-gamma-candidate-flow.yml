@@ -16,6 +16,7 @@ on:
       - 'tools/trace_m11_transport_strings.py'
       - 'tools/trace_m11_object_leaf_helpers.py'
       - 'tools/trace_m11_object_strings.py'
+      - 'tools/trace_m11_object_record_writers.py'
       - 'tools/trace_m11_gamma_codeptr_base.py'
       - 'tools/trace_m11_serializer_scalar_builders.py'
       - 'tools/trace_m11_gamma_subtype_blocks.py'
@@ -87,7 +88,7 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace exact gamma candidate flow, packets, helpers and transport
+      - name: Trace exact gamma candidate flow, object model and transport
         shell: bash
         run: |
           set -euo pipefail
@@ -103,14 +104,15 @@ jobs:
           python tools/trace_m11_transport_strings.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/transport_strings.md
           python tools/trace_m11_object_leaf_helpers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_leaf_helpers.md
           python tools/trace_m11_object_strings.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_strings.md
+          python tools/trace_m11_object_record_writers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_record_writers.md
           python tools/trace_m11_gamma_codeptr_base.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_codeptr_base.md
           python tools/trace_m11_serializer_scalar_builders.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/serializer_scalar_builders.md
           python tools/trace_m11_gamma_subtype_blocks.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
+          cat /tmp/r2a-gamma-flow/object_record_writers.md
           cat /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
           cat /tmp/r2a-gamma-flow/serializer_scalar_builders.md
           cat /tmp/r2a-gamma-flow/object_strings.md
           cat /tmp/r2a-gamma-flow/transport_strings.md
-          cat /tmp/r2a-gamma-flow/transport_engine.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
