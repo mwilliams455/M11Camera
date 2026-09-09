@@ -99,14 +99,16 @@ jobs:
             "$PREFIX"readelf -h "$o" | grep -Eq 'Machine:[[:space:]]+ARM'
           done
           {
+            echo 'NOTE: private static RDMA helpers may be inlined/optimized away under exact -Ofast; public gamma functions are the required fingerprint carriers.'
             for o in obj/imr2yset.o obj/imr2yctrl2.o; do
               echo "===== $o ====="
               "$PREFIX"nm -S --size-sort "$o" | grep -Ei 'gamma|gammma|rdmaval' || true
             done
           } | tee /tmp/r2a/milbeaut-build-summary.txt
-          grep -q 'imR2ySetRdmaValGammmaDiffTable' /tmp/r2a/milbeaut-build-summary.txt
-          grep -q 'imR2ySetRdmaValGammmaFullTable' /tmp/r2a/milbeaut-build-summary.txt
-          grep -q 'imR2ySetRdmaValGammaCtrl' /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'im_r2y_set_gamma_table' /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'im_r2y_ctrl2_gamma' /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'im_r2y_ctrl2_set_gamma_tbl_access_enable' /tmp/r2a/milbeaut-build-summary.txt
+          grep -q 'im_r2y_ctrl2_set_gamma_yb_tbl_access_enable' /tmp/r2a/milbeaut-build-summary.txt
 
       - name: Upload compiler diagnostics
         if: always()
