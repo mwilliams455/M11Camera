@@ -16,6 +16,7 @@ on:
       - 'tools/trace_m11_object_leaf_helpers.py'
       - 'tools/trace_m11_gamma_codeptr_base.py'
       - 'tools/trace_m11_serializer_scalar_builders.py'
+      - 'tools/trace_m11_gamma_subtype_blocks.py'
   workflow_dispatch:
 
 permissions:
@@ -100,7 +101,9 @@ jobs:
           python tools/trace_m11_object_leaf_helpers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_leaf_helpers.md
           python tools/trace_m11_gamma_codeptr_base.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_codeptr_base.md
           python tools/trace_m11_serializer_scalar_builders.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/serializer_scalar_builders.md
+          python tools/trace_m11_gamma_subtype_blocks.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
           cat /tmp/r2a-gamma-flow/gamma_codeptr_base.md
+          cat /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
           cat /tmp/r2a-gamma-flow/serializer_scalar_builders.md
           cat /tmp/r2a-gamma-flow/transport_engine.md
 
