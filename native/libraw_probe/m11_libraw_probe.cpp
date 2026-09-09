@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "m11_fd_datastream.h"
 #include "m11_raw_oracle_params.h"
 
 // This is deliberately not a decoder yet. It is an ABI/build probe proving
@@ -30,4 +31,12 @@ std::uint32_t m11_libraw_oracle_param_sentinel(int half_size) {
             ((p.half_size & 0x1) << 8) |
             ((p.output_bps & 0xff) << 16) |
             ((p.no_auto_bright & 0x1) << 24));
+}
+
+extern "C" __attribute__((visibility("default")))
+std::uint32_t m11_fd_datastream_abi_sentinel() {
+    // Force the SAF/Posix fd datastream implementation through the Android
+    // compiler/linker without opening or decoding any user file yet.
+    m11raw::FdDatastream invalid(-1);
+    return invalid.valid() == 0 ? 1u : 0u;
 }
