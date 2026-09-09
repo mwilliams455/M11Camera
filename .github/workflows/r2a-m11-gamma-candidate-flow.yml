@@ -18,6 +18,9 @@ on:
       - 'tools/trace_m11_object_strings.py'
       - 'tools/trace_m11_object_record_writers.py'
       - 'tools/trace_m11_object_table_users.py'
+      - 'tools/trace_m11_object_table_loader.py'
+      - 'tools/trace_m11_scalar_subtype_semantics.py'
+      - 'tools/trace_m11_gamma_entry_consumers.py'
       - 'tools/trace_m11_gamma_codeptr_base.py'
       - 'tools/trace_m11_serializer_scalar_builders.py'
       - 'tools/trace_m11_gamma_subtype_blocks.py'
@@ -89,7 +92,7 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace exact gamma candidate flow, object model and transport
+      - name: Trace exact gamma flow, object model, consumers and transport
         shell: bash
         run: |
           set -euo pipefail
@@ -107,14 +110,15 @@ jobs:
           python tools/trace_m11_object_strings.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_strings.md
           python tools/trace_m11_object_record_writers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_record_writers.md
           python tools/trace_m11_object_table_users.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_table_users.md
+          python tools/trace_m11_object_table_loader.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_table_loader.md
+          python tools/trace_m11_scalar_subtype_semantics.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/scalar_subtype_semantics.md
+          python tools/trace_m11_gamma_entry_consumers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_entry_consumers.md
           python tools/trace_m11_gamma_codeptr_base.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_codeptr_base.md
           python tools/trace_m11_serializer_scalar_builders.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/serializer_scalar_builders.md
           python tools/trace_m11_gamma_subtype_blocks.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
-          cat /tmp/r2a-gamma-flow/object_table_users.md
-          cat /tmp/r2a-gamma-flow/object_record_writers.md
-          cat /tmp/r2a-gamma-flow/gamma_subtype_blocks.md
-          cat /tmp/r2a-gamma-flow/object_strings.md
-          cat /tmp/r2a-gamma-flow/transport_strings.md
+          cat /tmp/r2a-gamma-flow/scalar_subtype_semantics.md
+          cat /tmp/r2a-gamma-flow/gamma_entry_consumers.md
+          cat /tmp/r2a-gamma-flow/object_table_loader.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
