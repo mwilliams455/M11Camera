@@ -1,0 +1,136 @@
+name: M11 APK1A Reference Assets
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - m11-apk1a
+    paths:
+      - 'tools/extract_m11p_forensics.py'
+      - 'tools/materialize_m11_reference_tables.py'
+      - 'renderer/reference/validate_forensics_data.py'
+      - '.github/workflows/m11-apk1a-reference-assets.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  derive-reference-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Download official Leica M11-P 2.6.1 firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/fw work/canonical work/materialized work/audit
+          referer='https://leica-camera.com/en-int/photography/cameras/m/m11-p-safari/downloads'
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
+          out='work/fw/LEICA_M11-P_2.6.1.FW'
+          urls=(
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'
+          )
+
+          : > work/audit/download_attempts.txt
+          success=0
+          for url in "${urls[@]}"; do
+            echo "TRY $url" | tee -a work/audit/download_attempts.txt
+            rm -f "$out"
+            if curl --http1.1 -fL --retry 6 --retry-all-errors --retry-delay 4 \
+              --connect-timeout 30 --max-time 300 \
+              -A "$ua" -e "$referer" \
+              -H 'Accept: application/octet-stream,application/*;q=0.9,*/*;q=0.8' \
+              -H 'Accept-Language: en-GB,en;q=0.9' \
+              -H 'Cache-Control: no-cache' \
+              "$url" -o "$out" 2>>work/audit/download_attempts.txt; then
+              size=$(stat -c '%s' "$out")
+              echo "SUCCESS size=$size url=$url" | tee -a work/audit/download_attempts.txt
+              if [ "$size" -gt 50000000 ]; then
+                printf '%s\n' "$url" > work/audit/source_url.txt
+                success=1
+                break
+              fi
+              echo 'REJECT undersized response' | tee -a work/audit/download_attempts.txt
+            fi
+          done
+          if [ "$success" -ne 1 ]; then
+            echo 'All Leica-owned firmware URL attempts failed.' >&2
+            exit 11
+          fi
+          sha256sum "$out" | tee work/audit/source_firmware_sha256.txt
+
+      - name: Canonically extract firmware-derived M11 tables
+        run: |
+          set -euo pipefail
+          python tools/extract_m11p_forensics.py \
+            work/fw/LEICA_M11-P_2.6.1.FW \
+            --out-dir work/canonical \
+            | tee work/audit/canonical_extract.txt
+
+      - name: Materialize frozen-renderer table contract
+        run: |
+          set -euo pipefail
+          python tools/materialize_m11_reference_tables.py \
+            --source-dir work/canonical \
+            --out-dir work/materialized \
+            --cc1-band 0 \
+            | tee work/audit/materialize.txt
+          python renderer/reference/validate_forensics_data.py work/materialized \
+            | tee work/audit/renderer_contract_validation.txt
+
+      - name: Audit extracted Category13 dependency words and table hashes
+        run: |
+          python - <<'PY' | tee work/audit/category13_dependency_audit.txt
+          import json
+          from pathlib import Path
+          p = Path('work/canonical/category13_CC1_candidate.json')
+          obj = json.loads(p.read_text())
+          print('canonical_schema=', obj.get('schema'))
+          print('band_count=', len(obj.get('bands', [])))
+          for i, band in enumerate(obj.get('bands', [])):
+              print(f'band[{i}].iso_range_raw={band.get("iso_range")}')
+              print(f'band[{i}].matrix_q9={band.get("matrix_q9")}')
+          sro = json.loads(Path('work/canonical/sro_colour_management.json').read_text())
+          print('sro.cm1_q12=', sro.get('cm1_q12'))
+          print('sro.cm2_q12=', sro.get('cm2_q12'))
+          print('sro.internal_matrix_raw=', sro.get('internal_matrix_raw'))
+          PY
+          find work/materialized -maxdepth 1 -type f -exec sha256sum {} \; \
+            | sort | tee work/audit/materialized_sha256.txt
+
+      - name: Stage derived-only evidence bundle
+        run: |
+          set -euo pipefail
+          mkdir -p work/export/canonical work/export/materialized work/export/audit
+          cp -a work/materialized/. work/export/materialized/
+          cp work/canonical/manifest.json work/export/canonical/
+          cp work/canonical/category3_CC0_candidate.json work/export/canonical/
+          cp work/canonical/category13_CC1_candidate.json work/export/canonical/
+          cp work/canonical/tone_q12_metadata.json work/export/canonical/
+          cp work/canonical/gamma_metadata.json work/export/canonical/
+          cp work/canonical/category24_YCC.json work/export/canonical/
+          cp work/canonical/category42_saturation.json work/export/canonical/
+          cp work/canonical/sro_colour_management.json work/export/canonical/
+          cp work/audit/category13_dependency_audit.txt work/export/audit/
+          cp work/audit/materialized_sha256.txt work/export/audit/
+          cp work/audit/renderer_contract_validation.txt work/export/audit/
+          cp work/audit/source_firmware_sha256.txt work/export/audit/
+          cp work/audit/source_url.txt work/export/audit/
+
+      - name: Upload firmware-derived reference assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-APK1A-reference-tables
+          path: work/export/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Explicitly remove proprietary firmware
+        if: always()
+        run: rm -rf work/fw
