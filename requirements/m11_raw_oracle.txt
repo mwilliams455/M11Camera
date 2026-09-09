@@ -1,0 +1,4 @@
+# RAW decode parity oracle only.
+# The Android native decoder is compared against this environment, not against
+# whatever rawpy happens to be newest at test time.
+rawpy==0.27.1
