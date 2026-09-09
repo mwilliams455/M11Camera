@@ -6,6 +6,7 @@ mechanical RDMA refactor drift that is independently recoverable from the same
 pinned public tree:
 
 * legacy T_IM_RDMA_CTRL / field / enum spellings -> refactored ImRdmaCtrl API;
+* legacy VP_CALLBACK -> pinned VpCallbackFunc callback typedef;
 * R2Y RDMA address arrays that old source still references directly but the
   refactor moved into utility translation units as file-static definitions.
 
@@ -39,6 +40,21 @@ def validate_rdma_api(src: Path) -> None:
     missing = [token for token in required if token not in text]
     if missing:
         raise RuntimeError(f"pinned ImRdmaCtrl evidence missing: {missing}")
+
+    typedef_h = src.parent.parent / "DeviceDriver/ARM/src/ddimtypedef.h"
+    if not typedef_h.is_file():
+        raise RuntimeError(f"missing pinned callback typedef header: {typedef_h}")
+    typedef_text = typedef_h.read_text(errors="ignore")
+    if not re.search(r"typedef\s+void\s*\(\*VpCallbackFunc\)\s*\(\s*\)\s*;", typedef_text):
+        raise RuntimeError("pinned VpCallbackFunc typedef evidence missing")
+
+    # imrdma.h retained the legacy name although the same pinned tree renamed
+    # the callback typedef in ddimtypedef.h. Repair only that exact type token.
+    n = len(re.findall(r"\bVP_CALLBACK\b", text))
+    if n == 0:
+        raise RuntimeError("expected legacy VP_CALLBACK token missing in imrdma.h")
+    header.write_text(re.sub(r"\bVP_CALLBACK\b", "VpCallbackFunc", text))
+    print(f"  VP_CALLBACK -> VpCallbackFunc ({n} use(s) in imrdma.h)")
 
 
 def bridge_legacy_rdma_names(src: Path, targets: list[Path]) -> None:
