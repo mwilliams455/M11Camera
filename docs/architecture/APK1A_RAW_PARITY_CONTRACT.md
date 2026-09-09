@@ -8,13 +8,73 @@ This document freezes the RAW decode/demosaic boundary used by the current contr
 
 The Android renderer must not silently substitute Android framework DNG/JPEG colour processing for this stage. Until a decoder meets this contract, APK1A remains a metadata/source-transform diagnostic shell.
 
+## Proven decoder identity gates — 2026-09-09
+
+The decoder generation is now frozen and independently reproduced on both sides of the future parity comparison.
+
+### Python oracle
+
+CI workflow: `M11 APK1A rawpy Oracle Probe`
+
+Successful run: `34404116226`
+
+Verified runtime identity:
+
+```text
+rawpy = 0.27.1
+LibRaw = 0.22.1
+demosaic = AHD
+identity_gate = true
+```
+
+Artifact: `M11-APK1A-rawpy-oracle-identity`, artifact ID `10124622326`.
+
+The Python environment is pinned by `requirements/m11_raw_oracle.txt` and fail-closed by `tools/validate_m11_raw_oracle_environment.py`.
+
+### Android arm64 native feasibility
+
+CI workflow: `M11 APK1A LibRaw Android Probe`
+
+Successful run: `34404019745`
+
+Pinned source identities:
+
+```text
+LibRaw tag/commit = 0.22.1 / b860248a89d9082b8e0a1e202e516f46af9adb29
+LibRaw-cmake commit = eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+NDK = 27.2.12479018
+ABI = arm64-v8a
+minimum Android platform = 26
+```
+
+The probe configuration compiled LibRaw with:
+
+```text
+OpenMP = OFF
+LCMS = OFF
+RawSpeed = OFF
+DNG deflate = ON
+DNG lossy/JPEG = OFF
+AHD source = compiled
+```
+
+The produced AArch64 shared-object probe had SHA-256:
+
+```text
+f72f8bc9bd175839f37a287c97b8b16a8d7b98c5714dac79c31ec15c59faf36f
+```
+
+It linked only normal Android runtime dependencies (`libm`, `libz`, `libdl`, `libc`) and exported the intended LibRaw version probe symbols.
+
+This proves Android arm64 compile/link feasibility for the same LibRaw generation. It does **not** prove RAW pixel parity yet.
+
 ## Authoritative current oracle
 
 Source: `tools/render_xiaomi_m11_controlled.py::decode_camera_rgb`
 
 Backend:
 
-- `rawpy` / LibRaw
+- `rawpy 0.27.1` / `LibRaw 0.22.1`
 - demosaic algorithm: AHD
 - output: 3-channel `uint16`
 - output colour space: raw camera RGB
@@ -87,7 +147,7 @@ For every decoded DNG, record at least:
 - WB policy
 - normalization policy
 
-APK1A now also reads Exif ISO independently so Category-13 CC1 selection is based on the recorded capture ISO rather than a guessed band.
+APK1A also reads Exif ISO independently so Category-13 CC1 selection is based on the recorded capture ISO rather than a guessed band. The high-ISO `65535` legacy sentinel is resolved only from consistent extended sensitivity tags; disagreement remains unresolved rather than selecting a CC1 band heuristically.
 
 ## Required parity comparison
 
@@ -109,7 +169,7 @@ No numerical pass threshold is declared yet. It must be set from measured same-D
 
 Preferred order:
 
-1. **JNI LibRaw path using AHD** — highest probability of reproducing the oracle semantics.
+1. **JNI LibRaw 0.22.1 path using AHD** — highest probability of reproducing the now-frozen Python oracle semantics.
 2. Independent AHD implementation — acceptable only if measured parity is demonstrated.
 3. Android framework/preview decode — not acceptable as the RAW parity oracle because colour/WB/tone behavior is not under the same contract.
 
@@ -121,6 +181,10 @@ Do not wire RAW pixels into `M11ReferenceRendererCore` until:
 
 - Android <-> Python renderer stage parity is green;
 - ISO/CC1 selection is evidence-driven;
+- Python RAW oracle identity is frozen;
+- Android LibRaw build identity is frozen;
 - the RAW decoder has same-DNG parity evidence against this contract.
+
+The first four gates above are now green. The same-DNG RAW pixel parity gate remains open.
 
 The unresolved third SRO matrix remains outside this work and must stay inactive.
