@@ -68,16 +68,21 @@ def decode_context(d,off,words=12):
         out.append(f'0x{p:08x}: 0x{v:08x}'+((' ; '+' ; '.join(ann)) if ann else ''))
     return out
 def marker_for_case(d,t):
+    # Each marker case is a tiny straight-line block ending in an unconditional
+    # branch to the common validator path. Stop at that branch so the first
+    # MOVW of the following case cannot overwrite the shared low halfword.
     md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN)
-    ins=list(md.disasm(d[t:min(len(d),t+0x18)],t))
+    ins=list(md.disasm(d[t:min(len(d),t+0x40)],t))
     lo=None;endhi=None;starthi=None
     for i in ins:
         if i.mnemonic=='movw' and i.op_str.startswith('r7,'):
             m=re.search(r'#(0x[0-9a-f]+|[0-9]+)',i.op_str);lo=int(m.group(1),0) if m else None
-        if i.mnemonic=='movt' and i.op_str.startswith('r7,'):
+        elif i.mnemonic=='movt' and i.op_str.startswith('r7,'):
             m=re.search(r'#(0x[0-9a-f]+|[0-9]+)',i.op_str);endhi=int(m.group(1),0) if m else None
-        if i.mnemonic=='movt' and i.op_str.startswith('r3,'):
+        elif i.mnemonic=='movt' and i.op_str.startswith('r3,'):
             m=re.search(r'#(0x[0-9a-f]+|[0-9]+)',i.op_str);starthi=int(m.group(1),0) if m else None
+        if i.mnemonic=='b':
+            break
     if lo is None or endhi is None or starthi is None:return None
     start=((starthi&0xffff)<<16)|(lo&0xffff);end=((endhi&0xffff)<<16)|(lo&0xffff)
     def ascii4(v):
