@@ -8,6 +8,7 @@ on:
       - 'tools/trace_m11_gamma_candidate_flow.py'
       - 'tools/trace_m11_gamma_dispatch_tables.py'
       - 'tools/trace_m11_bb06_packet_submit.py'
+      - 'tools/trace_m11_bb06_packet_submit_v2.py'
   workflow_dispatch:
 
 permissions:
@@ -90,7 +91,10 @@ jobs:
           python tools/trace_m11_bb06_packet_submit.py \
             /tmp/M11P.bin \
             --output /tmp/r2a-gamma-flow/bb06_packet_submit.md
-          cat /tmp/r2a-gamma-flow/bb06_packet_submit.md
+          python tools/trace_m11_bb06_packet_submit_v2.py \
+            /tmp/M11P.bin \
+            --output /tmp/r2a-gamma-flow/bb06_packet_submit_v2.md
+          cat /tmp/r2a-gamma-flow/bb06_packet_submit_v2.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
