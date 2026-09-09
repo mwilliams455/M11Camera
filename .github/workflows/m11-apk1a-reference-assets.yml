@@ -8,6 +8,7 @@ on:
     paths:
       - 'tools/extract_m11p_forensics.py'
       - 'tools/materialize_m11_reference_tables.py'
+      - 'tools/package_m11_apk_assets.py'
       - 'renderer/reference/validate_forensics_data.py'
       - '.github/workflows/m11-apk1a-reference-assets.yml'
 
@@ -84,6 +85,17 @@ jobs:
           python renderer/reference/validate_forensics_data.py work/materialized \
             | tee work/audit/renderer_contract_validation.txt
 
+      - name: Package deterministic Android reference asset
+        run: |
+          set -euo pipefail
+          python tools/package_m11_apk_assets.py \
+            --canonical-dir work/canonical \
+            --out-bin work/materialized/m11_reference_tables_v1.bin \
+            --out-manifest work/materialized/m11_reference_tables_v1.json \
+            | tee work/audit/android_asset_package.txt
+          sha256sum work/materialized/m11_reference_tables_v1.bin \
+            | tee work/audit/android_asset_sha256.txt
+
       - name: Audit extracted Category13 dependency words and table hashes
         run: |
           python - <<'PY' | tee work/audit/category13_dependency_audit.txt
@@ -122,6 +134,8 @@ jobs:
           cp work/audit/renderer_contract_validation.txt work/export/audit/
           cp work/audit/source_firmware_sha256.txt work/export/audit/
           cp work/audit/source_url.txt work/export/audit/
+          cp work/audit/android_asset_package.txt work/export/audit/
+          cp work/audit/android_asset_sha256.txt work/export/audit/
 
       - name: Upload firmware-derived reference assets
         uses: actions/upload-artifact@v4
