@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Trace Leica M11-P consumers/registrations of gamma packet entrypoints.
 
-Primary targets are the exact Leica gamma diagnostic/packet families:
-  0x0157933c -- main gamma object/packet builder family
+Primary targets are the exact Leica gamma callable/adjacent families:
+  0x01579338 -- true callable gamma-main entry (directly called by 0x0157bcbc)
   0x01579bf8 -- adjacent gamma-invalid / BB060017 family
 The independently proven code-pointer affine 0x3faa87d0 lets us search for
 translated function pointers in data/dispatch tables in addition to direct A32
@@ -12,7 +12,6 @@ assigned.
 from __future__ import annotations
 
 import argparse, hashlib, struct
-from collections import defaultdict
 from pathlib import Path
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_LITTLE_ENDIAN
 
@@ -20,7 +19,7 @@ EXPECTED_SHA256="28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3
 CODEPTR_BASE=0x3FAA87D0
 DATA_BASE=0x3EFD2A98
 TARGETS={
-    'gamma_main':0x0157933C,
+    'gamma_main_callable':0x01579338,
     'gamma_invalid':0x01579BF8,
 }
 SCAN_CODE_START=0x01000000
@@ -66,7 +65,7 @@ def printable(d,raw,maxlen=160):
     except:return None
     if any((ord(c)<32 and c not in '\r\n\t') or ord(c)>=127 for c in s):return None
     return s.replace('\n','\\n').replace('\r','\\r')
-def disasm(d,s,e,limit=140):
+def disasm(d,s,e,limit=180):
     md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.skipdata=True;out=[]
     for n,i in enumerate(md.disasm(d[max(0,s):min(len(d),e)],max(0,s))):
         if n>=limit:break
@@ -92,7 +91,7 @@ def pointer_context(d,off,radius_words=8):
 def report(d):
     h=hashlib.sha256(d).hexdigest()
     if h!=EXPECTED_SHA256:raise ValueError(h)
-    lines=['# M11-P R2A gamma entry consumer / registration trace','',f'- SHA-256: `{h}`',f'- proven code-pointer affine: `0x{CODEPTR_BASE:08x}`','']
+    lines=['# M11-P R2A gamma entry consumer / registration trace','',f'- SHA-256: `{h}`',f'- proven code-pointer affine: `0x{CODEPTR_BASE:08x}`','- gamma main callable entry corrected to `0x01579338` from a direct higher-level BL at `0x0157bcbc`.','']
     for name,target in TARGETS.items():
         ptr=(target+CODEPTR_BASE)&0xffffffff;calls=direct_callers(d,target);ph=all_word_hits(d,ptr);rawhits=all_word_hits(d,target)
         lines += [f'## `{name}` raw `0x{target:08x}`','',f'- translated code pointer: `0x{ptr:08x}`',f'- direct A32 BL callers: `{len(calls)}`',f'- exact translated-pointer words in full image: `{len(ph)}`',f'- raw-offset word occurrences in full image: `{len(rawhits)}`','']
@@ -101,7 +100,7 @@ def report(d):
             for c in calls:
                 pro=nearest_prologue(d,c);end=next_prologue(d,pro) if pro else c+0x80
                 lines.append(f'- call `0x{c:08x}` / prologue `{("0x%08x"%pro) if pro else "unknown"}` / bound `{("0x%08x"%end) if end else "unknown"}`')
-                lines += ['```text'];lines.extend(disasm(d,max(pro or c,c-0x90),min(end,c+0x50),90));lines += ['```','']
+                lines += ['```text'];lines.extend(disasm(d,max(pro or c,c-0xc0),min(end,c+0x90),150));lines += ['```','']
         if ph:
             lines += ['### Translated code-pointer contexts','']
             for off in ph[:80]:
