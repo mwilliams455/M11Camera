@@ -7,6 +7,7 @@ on:
       - '.github/workflows/r2a-m11-gamma-candidate-flow.yml'
       - 'tools/trace_m11_gamma_candidate_flow.py'
       - 'tools/trace_m11_gamma_dispatch_tables.py'
+      - 'tools/trace_m11_bb06_packet_submit.py'
   workflow_dispatch:
 
 permissions:
@@ -75,7 +76,7 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace exact gamma candidate control flow and dispatch tables
+      - name: Trace exact gamma candidate flow, dispatch and packet submit namespace
         shell: bash
         run: |
           set -euo pipefail
@@ -86,7 +87,10 @@ jobs:
           python tools/trace_m11_gamma_dispatch_tables.py \
             /tmp/M11P.bin \
             --output /tmp/r2a-gamma-flow/gamma_dispatch_tables.md
-          cat /tmp/r2a-gamma-flow/gamma_dispatch_tables.md
+          python tools/trace_m11_bb06_packet_submit.py \
+            /tmp/M11P.bin \
+            --output /tmp/r2a-gamma-flow/bb06_packet_submit.md
+          cat /tmp/r2a-gamma-flow/bb06_packet_submit.md
 
       - name: Upload derived trace only
         uses: actions/upload-artifact@v4
