@@ -1,0 +1,86 @@
+name: M11 APK1A FD Datastream Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - m11-apk1a
+    paths:
+      - 'native/libraw_probe/m11_fd_datastream.h'
+      - 'native/libraw_probe/m11_fd_datastream_test.cpp'
+      - '.github/workflows/m11-apk1a-fd-datastream-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  host-conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned LibRaw sources and CMake wrapper
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git work/LibRaw
+          git -C work/LibRaw checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git work/LibRaw-cmake
+          git -C work/LibRaw-cmake checkout --detach "$LIBRAW_CMAKE_COMMIT"
+          test "$(git -C work/LibRaw rev-parse HEAD)" = "$LIBRAW_COMMIT"
+          test "$(git -C work/LibRaw-cmake rev-parse HEAD)" = "$LIBRAW_CMAKE_COMMIT"
+
+      - name: Configure fd datastream conformance test
+        run: |
+          set -euo pipefail
+          mkdir -p work/fd_probe
+          cat > work/fd_probe/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.22)
+          project(m11_fd_datastream_probe LANGUAGES C CXX)
+
+          set(LIBRAW_PATH "${CMAKE_CURRENT_LIST_DIR}/../LibRaw" CACHE STRING "" FORCE)
+          set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_OPENMP OFF CACHE BOOL "" FORCE)
+          set(ENABLE_LCMS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_JASPER OFF CACHE BOOL "" FORCE)
+          set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+          set(ENABLE_RAWSPEED OFF CACHE BOOL "" FORCE)
+          set(ENABLE_DCRAW_DEBUG OFF CACHE BOOL "" FORCE)
+          set(ENABLE_X3FTOOLS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_6BY9RPI OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_INSTALL OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
+
+          add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../LibRaw-cmake" "${CMAKE_BINARY_DIR}/libraw")
+          add_executable(m11fdstreamtest "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe/m11_fd_datastream_test.cpp")
+          target_compile_features(m11fdstreamtest PRIVATE cxx_std_17)
+          target_include_directories(m11fdstreamtest PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe")
+          target_link_libraries(m11fdstreamtest PRIVATE libraw::libraw)
+          CMAKE
+
+          cmake -S work/fd_probe -B work/fd_build -DCMAKE_BUILD_TYPE=Release | tee work/fd_configure.log
+
+      - name: Build and run fd datastream conformance test
+        run: |
+          set -euo pipefail
+          cmake --build work/fd_build --target m11fdstreamtest --parallel 2 | tee work/fd_build.log
+          exe=$(find work/fd_build -name 'm11fdstreamtest' -type f -perm -111 -print -quit)
+          test -n "$exe"
+          "$exe" | tee work/fd_conformance.txt
+          grep -q 'fd_datastream_conformance=true' work/fd_conformance.txt
+
+      - name: Upload fd datastream evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-APK1A-fd-datastream-conformance
+          path: |
+            work/fd_conformance.txt
+            work/fd_configure.log
+            work/fd_build.log
+          if-no-files-found: error
+          retention-days: 14
