@@ -8,6 +8,8 @@ on:
     paths:
       - 'tools/decompress_m11.py'
       - 'tools/m11_romfs_probe.py'
+      - 'tools/m11_romfs_probe_cli.py'
+      - 'tools/probe_m11_upstream_color132.py'
       - 'tools/probe_r2y_recorded_signatures.py'
       - 'tools/probe_m11_extracted_assets.py'
       - '.github/workflows/r0-official-firmware-probe.yml'
@@ -33,7 +35,7 @@ jobs:
           out='work/fw/LEICA_M11-P_2.6.1.FW'
 
           # Leica's current downloads page resolves its Firmware 2.6.1 button to
-          # /sites/default/files/LEICA_M11-P_2.6.1.FW.  Try only Leica-owned URL
+          # /sites/default/files/LEICA_M11-P_2.6.1.FW. Try only Leica-owned URL
           # variants here; no mirror is silently substituted for the evidence source.
           urls=(
             'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW'
@@ -86,9 +88,16 @@ jobs:
           sha256sum work/fw/LEICA_M11-P_2.6.1_unpacked.bin \
             | tee work/results/unpacked_sha256.txt
 
+      - name: Reproduce upstream 132-byte M11 colour-management structure
+        run: |
+          python tools/probe_m11_upstream_color132.py \
+            work/fw/LEICA_M11-P_2.6.1_unpacked.bin \
+            --out work/results/upstream_color132_probe.json \
+            | tee work/results/upstream_color132_probe.txt
+
       - name: Inventory ROMFS and extract named image-pipeline assets ephemerally
         run: |
-          python tools/m11_romfs_probe.py \
+          python tools/m11_romfs_probe_cli.py \
             work/fw/LEICA_M11-P_2.6.1_unpacked.bin \
             --scan \
             --list-files \
@@ -140,7 +149,7 @@ jobs:
             | tee work/results/named_asset_probe.txt
 
           # Derived CSVs contain only reconstructed numeric tables, never arbitrary
-          # firmware file contents.  Hash/inventory them for provenance.
+          # firmware file contents. Hash/inventory them for provenance.
           find work/derived -type f -printf '%p %s bytes\n' \
             | sort | tee work/results/derived_asset_inventory.txt || true
           find work/derived -type f -exec sha256sum {} \; \
@@ -151,7 +160,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m11p-261-firmware-derived-probe-r2
+          name: m11p-261-firmware-derived-probe-r3
           path: work/results/
           if-no-files-found: warn
           retention-days: 7
