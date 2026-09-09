@@ -26,6 +26,8 @@ jobs:
         run: |
           python -m py_compile tools/decompress_m11.py
           python -m py_compile tools/m11_romfs_probe.py
+          python -m py_compile tools/m11_romfs_probe_cli.py
+          python -m py_compile tools/probe_m11_upstream_color132.py
           python -m py_compile tools/extract_m11p_forensics.py
           python -m py_compile tools/summarize_m11p_open_categories.py
           python -m py_compile tools/probe_r2y_recorded_signatures.py
