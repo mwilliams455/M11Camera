@@ -11,6 +11,7 @@ on:
       - 'tools/trace_m11_bb06_packet_submit_v2.py'
       - 'tools/trace_m11_gamma_helper_calls.py'
       - 'tools/trace_m11_submit_transport.py'
+      - 'tools/trace_m11_transport_core.py'
       - 'tools/trace_m11_object_leaf_helpers.py'
       - 'tools/trace_m11_gamma_codeptr_base.py'
   workflow_dispatch:
@@ -81,7 +82,7 @@ jobs:
       - name: Install disassembly dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace exact gamma candidate flow, packets, helpers, transport and code pointers
+      - name: Trace exact gamma candidate flow, packets, helpers and transport
         shell: bash
         run: |
           set -euo pipefail
@@ -92,9 +93,10 @@ jobs:
           python tools/trace_m11_bb06_packet_submit_v2.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/bb06_packet_submit_v2.md
           python tools/trace_m11_gamma_helper_calls.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_helper_calls.md
           python tools/trace_m11_submit_transport.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/submit_transport.md
+          python tools/trace_m11_transport_core.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/transport_core.md
           python tools/trace_m11_object_leaf_helpers.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/object_leaf_helpers.md
           python tools/trace_m11_gamma_codeptr_base.py /tmp/M11P.bin --output /tmp/r2a-gamma-flow/gamma_codeptr_base.md
-          cat /tmp/r2a-gamma-flow/submit_transport.md
+          cat /tmp/r2a-gamma-flow/transport_core.md
           cat /tmp/r2a-gamma-flow/object_leaf_helpers.md
           cat /tmp/r2a-gamma-flow/gamma_codeptr_base.md
 
