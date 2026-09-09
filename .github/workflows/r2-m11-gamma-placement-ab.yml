@@ -1,0 +1,98 @@
+name: R2 M11 bounded gamma placement A/B
+
+on:
+  push:
+    branches: [research/m11-r0-evidence-input-space]
+    paths:
+      - 'tools/probe_m11_gamma_placement_ab.py'
+      - '.github/workflows/r2-m11-gamma-placement-ab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libimage-exiftool-perl libgl1
+          python -m pip install --disable-pip-version-check numpy rawpy pillow opencv-python-headless
+      - name: Acquire exact hash-gated M11-P updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/154.0 Safari/537.36'
+          expected_size='63621633'
+          expected_sha='0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83'
+          out=/tmp/LEICA_M11-P_2.6.1.FW
+          verify() { [ -f "$out" ] && [ "$(stat -c%s "$out")" = "$expected_size" ] && [ "$(sha256sum "$out"|awk '{print $1}')" = "$expected_sha" ]; }
+          rm -f "$out"
+          for url in \
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW' \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'; do
+            curl --http1.1 -L --fail --retry 1 --retry-all-errors -A "$ua" \
+              -e 'https://leica-camera.com/en-GB/photography/cameras/m/m11-p-black/downloads' \
+              --connect-timeout 20 --max-time 180 -o "$out" "$url" || true
+            if verify; then break; fi
+          done
+          if ! verify; then
+            popup='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+            curl --http1.1 -L --fail -A "$ua" --connect-timeout 20 --max-time 60 -o /tmp/tld.html "$popup"
+            python - <<'PY' >/tmp/tld_urls.txt
+          import re
+          from pathlib import Path
+          from html import unescape
+          from urllib.parse import urljoin
+          base='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+          t=Path('/tmp/tld.html').read_text(errors='replace'); out=[]
+          for raw in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''',t,re.I):
+              u=urljoin(base,unescape(raw)); l=u.lower()
+              if ('fichiers.touslesdrivers.com' in l or 'leica-camera.com' in l) and ('84657' in l or '.fw' in l) and u not in out: out.append(u)
+          print('\n'.join(out))
+          PY
+            while IFS= read -r url; do
+              [ -n "$url" ] || continue
+              rm -f "$out"
+              curl --http1.1 -L --fail -A "$ua" -e "$popup" --connect-timeout 20 --max-time 180 -o "$out" "$url" || true
+              if verify; then break; fi
+            done </tmp/tld_urls.txt
+          fi
+          verify
+      - name: Extract exact firmware tables
+        run: |
+          mkdir -p /tmp/m11-forensics
+          python tools/extract_m11p_forensics.py /tmp/LEICA_M11-P_2.6.1.FW --out-dir /tmp/m11-forensics
+      - name: Download same 12 matched Leica M11 pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/m11pairs /tmp/result
+          base='https://img.photographyblog.com/reviews/leica_m11/sample_images'
+          for n in 01 04 05 10 14 20 24 31 34 37 38 45; do
+            for ext in dng jpg; do
+              f="leica_m11_${n}.${ext}"
+              curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 "$base/$f" -o "/tmp/m11pairs/$f"
+            done
+          done
+      - name: Run single bounded placement A/B
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/probe_m11_gamma_placement_ab.py \
+            --dir /tmp/m11pairs --forensics /tmp/m11-forensics \
+            --pairs 01 04 05 10 14 20 24 31 34 37 38 45 \
+            --out /tmp/result/gamma_placement_ab.json | tee /tmp/result/gamma_placement_ab.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m11-r2-gamma-placement-ab
+          path: /tmp/result/*
+          retention-days: 14
+          if-no-files-found: error
