@@ -39,7 +39,8 @@ public final class MainActivity extends Activity {
         TextView scope = new TextView(this);
         scope.setText("Offline DNG research renderer foundation. Capture integration is intentionally deferred until controlled-render parity is stable.\n\n" +
                 M11MatrixCore.thirdTargetSummary() + "\n\n" +
-                "Third-matrix consumer placement: UNRESOLVED / not hard-wired.");
+                "Third-matrix consumer placement: UNRESOLVED / not hard-wired.\n" +
+                "CC1 selection: exact firmware ISO bands only; no nearest-band guessing.");
         body.addView(scope);
 
         Button open = new Button(this);
@@ -48,7 +49,7 @@ public final class MainActivity extends Activity {
         body.addView(open);
 
         status = new TextView(this);
-        status.setText("No DNG selected. Metadata/source-transform validation is ready.");
+        status.setText("No DNG selected. Metadata/source-transform/ISO-band validation is ready.");
         status.setTextIsSelectable(true);
         body.addView(status);
 
@@ -92,6 +93,7 @@ public final class MainActivity extends Activity {
                 try (FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
                      FileChannel channel = in.getChannel()) {
                     DngMetadataReader.Metadata meta = DngMetadataReader.read(channel);
+                    DngIsoReader.Result iso = DngIsoReader.read(channel);
                     s.append("\n\nDNG source metadata\n")
                             .append("make=").append(meta.make).append('\n')
                             .append("model=").append(meta.model).append('\n')
@@ -108,7 +110,10 @@ public final class MainActivity extends Activity {
                             .append(meta.cameraCalibration1DefaultedIdentity).append('\n')
                             .append("CameraCalibration2DefaultedIdentity=")
                             .append(meta.cameraCalibration2DefaultedIdentity).append('\n')
-                            .append("sourceTransformReady=").append(meta.sourceTransformReady());
+                            .append("sourceTransformReady=").append(meta.sourceTransformReady()).append('\n')
+                            .append("iso=").append(iso.present() ? iso.iso : "unavailable").append('\n')
+                            .append("isoSource=").append(iso.sourceName()).append('\n')
+                            .append("firmwareCc1Band=").append(cc1BandSummary(iso));
 
                     if (meta.sourceTransformReady()) {
                         M11SourceAdapterCore.Result transform = M11SourceAdapterCore.buildDualIlluminantTransform(
@@ -139,6 +144,16 @@ public final class MainActivity extends Activity {
         }
         final String text = result;
         runOnUiThread(() -> status.setText(text));
+    }
+
+    private static String cc1BandSummary(DngIsoReader.Result iso) {
+        if (!iso.present()) return "unresolved (ISO evidence unavailable)";
+        int value = iso.iso;
+        if (value < 10000) return "band0 [0,10000)";
+        if (value < 20000) return "band1 [10000,20000)";
+        if (value < 40000) return "band2 [20000,40000)";
+        if (value < 200000) return "band3 [40000,200000)";
+        return "unresolved (outside extracted firmware intervals)";
     }
 
     private String describeDocument(Uri uri) {
