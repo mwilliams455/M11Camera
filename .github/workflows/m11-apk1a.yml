@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           python -m unittest tests.test_materialize_m11_reference_tables -v
           python -m py_compile tools/package_m11_apk_assets.py tools/generate_m11_android_python_parity_fixture.py
-          python tools/generate_m11_android_python_parity_fixture.py \
+          PYTHONPATH=. python tools/generate_m11_android_python_parity_fixture.py \
             --out app/src/test/resources/m11_python_android_parity_v1.b64
           test -s app/src/test/resources/m11_python_android_parity_v1.b64
 
