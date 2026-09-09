@@ -37,7 +37,7 @@ def bl_target(off,w):
     if imm&0x800000:imm-=0x1000000
     return off+8+(imm<<2)
 def imap(d,s,e):
-    md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN)
+    md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.skipdata=True
     return {i.address:i for i in md.disasm(d[s:e],s)}
 def req(m,a,mn,contains=None,exact=None):
     i=m.get(a)
