@@ -5,17 +5,19 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
  * Minimal classic-TIFF/Exif ISO reader for firmware Category-13 CC1 selection.
  *
  * DNG's primary IFD does not have to contain PhotographicSensitivity directly;
- * ordinary files usually point to an ExifIFD (tag 34665).  This reader follows
+ * ordinary files usually point to an ExifIFD (tag 34665). This reader follows
  * the normal IFD chain, SubIFDs and ExifIFD pointers without interpreting image
- * payloads.  It deliberately returns no guessed ISO when no supported evidence
- * is present.
+ * payloads. It deliberately returns no guessed ISO when no supported evidence
+ * is present or when high-ISO extended tags disagree.
  */
 public final class DngIsoReader {
     private DngIsoReader() {}
@@ -26,8 +28,11 @@ public final class DngIsoReader {
     private static final int TAG_SUB_IFDS = 330;
     private static final int TAG_EXIF_IFD = 34665;
     private static final int TAG_PHOTOGRAPHIC_SENSITIVITY = 34855;
+    private static final int TAG_SENSITIVITY_TYPE = 34864;
+    private static final int TAG_STANDARD_OUTPUT_SENSITIVITY = 34865;
     private static final int TAG_RECOMMENDED_EXPOSURE_INDEX = 34866;
     private static final int TAG_ISO_SPEED = 34867;
+    private static final int SOURCE_AMBIGUOUS_HIGH_ISO = -2;
 
     public static final class Result {
         public final int iso;
@@ -45,8 +50,10 @@ public final class DngIsoReader {
         public String sourceName() {
             return switch (sourceTag) {
                 case TAG_PHOTOGRAPHIC_SENSITIVITY -> "PhotographicSensitivity";
+                case TAG_STANDARD_OUTPUT_SENSITIVITY -> "StandardOutputSensitivity";
                 case TAG_RECOMMENDED_EXPOSURE_INDEX -> "RecommendedExposureIndex";
                 case TAG_ISO_SPEED -> "ISOSpeed";
+                case SOURCE_AMBIGUOUS_HIGH_ISO -> "high-ISO sensitivity tags ambiguous/unresolved";
                 default -> "none";
             };
         }
@@ -54,14 +61,48 @@ public final class DngIsoReader {
 
     private static final class Candidate {
         int photographic = -1;
+        int sensitivityType = -1;
+        int standard = -1;
         int recommended = -1;
         int isoSpeed = -1;
 
         Result result() {
-            if (photographic > 0) return new Result(photographic, TAG_PHOTOGRAPHIC_SENSITIVITY);
-            if (recommended > 0) return new Result(recommended, TAG_RECOMMENDED_EXPOSURE_INDEX);
-            if (isoSpeed > 0) return new Result(isoSpeed, TAG_ISO_SPEED);
-            return new Result(-1, -1);
+            if (photographic > 0 && photographic < 65535) {
+                return new Result(photographic, TAG_PHOTOGRAPHIC_SENSITIVITY);
+            }
+            if (photographic == 65535) {
+                Result extended = resolveExtended();
+                if (extended != null) return extended;
+                return new Result(-1, SOURCE_AMBIGUOUS_HIGH_ISO);
+            }
+            Result extended = resolveExtended();
+            return extended != null ? extended : new Result(-1, -1);
+        }
+
+        private Result resolveExtended() {
+            List<Result> values = new ArrayList<>();
+            addIfSelected(values, 1, 4, 5, 7, standard, TAG_STANDARD_OUTPUT_SENSITIVITY);
+            addIfSelected(values, 2, 4, 6, 7, recommended, TAG_RECOMMENDED_EXPOSURE_INDEX);
+            addIfSelected(values, 3, 5, 6, 7, isoSpeed, TAG_ISO_SPEED);
+
+            if (sensitivityType <= 0 || sensitivityType > 7) {
+                values.clear();
+                if (standard > 0) values.add(new Result(standard, TAG_STANDARD_OUTPUT_SENSITIVITY));
+                if (recommended > 0) values.add(new Result(recommended, TAG_RECOMMENDED_EXPOSURE_INDEX));
+                if (isoSpeed > 0) values.add(new Result(isoSpeed, TAG_ISO_SPEED));
+            }
+            if (values.isEmpty()) return null;
+            int value = values.get(0).iso;
+            for (Result r : values) if (r.iso != value) return null;
+            return values.get(0);
+        }
+
+        private void addIfSelected(List<Result> out, int a, int b, int c, int d,
+                                   int value, int tag) {
+            if ((sensitivityType == a || sensitivityType == b || sensitivityType == c || sensitivityType == d)
+                    && value > 0) {
+                out.add(new Result(value, tag));
+            }
         }
     }
 
@@ -103,11 +144,14 @@ public final class DngIsoReader {
                 int type = e.getShort() & 0xffff;
                 long valueCount = e.getInt() & 0xffffffffL;
 
-                if (tag == TAG_PHOTOGRAPHIC_SENSITIVITY ||
-                        tag == TAG_RECOMMENDED_EXPOSURE_INDEX || tag == TAG_ISO_SPEED) {
+                if (tag == TAG_PHOTOGRAPHIC_SENSITIVITY || tag == TAG_SENSITIVITY_TYPE ||
+                        tag == TAG_STANDARD_OUTPUT_SENSITIVITY || tag == TAG_RECOMMENDED_EXPOSURE_INDEX ||
+                        tag == TAG_ISO_SPEED) {
                     int value = firstPositiveInteger(ch, order, raw, type, valueCount);
                     if (value > 0) {
                         if (tag == TAG_PHOTOGRAPHIC_SENSITIVITY && candidate.photographic < 0) candidate.photographic = value;
+                        else if (tag == TAG_SENSITIVITY_TYPE && candidate.sensitivityType < 0) candidate.sensitivityType = value;
+                        else if (tag == TAG_STANDARD_OUTPUT_SENSITIVITY && candidate.standard < 0) candidate.standard = value;
                         else if (tag == TAG_RECOMMENDED_EXPOSURE_INDEX && candidate.recommended < 0) candidate.recommended = value;
                         else if (tag == TAG_ISO_SPEED && candidate.isoSpeed < 0) candidate.isoSpeed = value;
                     }
@@ -136,6 +180,7 @@ public final class DngIsoReader {
         int size = typeSize(type);
         if (size == 0) return -1;
         byte[] data = valueBytes(ch, order, raw, size, count);
+        if (data.length < size) return -1;
         ByteBuffer b = ByteBuffer.wrap(data).order(order);
         long value;
         switch (type) {
@@ -165,6 +210,7 @@ public final class DngIsoReader {
         if ((type != 3 && type != 4) || count < 1 || count > 1024) return new long[0];
         int size = typeSize(type);
         byte[] data = valueBytes(ch, order, raw, size, count);
+        if (data.length < size * count) return new long[0];
         ByteBuffer b = ByteBuffer.wrap(data).order(order);
         long[] out = new long[(int) count];
         for (int i = 0; i < out.length; i++) {
