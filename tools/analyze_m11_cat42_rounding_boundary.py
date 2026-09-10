@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Quantify the remaining Cat42 per-pixel integer arithmetic ambiguity.
 
-The Cat42 map generator now establishes Q3 slope codes exactly. This tool does
-NOT select a hardware convention. It enumerates plausible local-coordinate,
-border-selection and signed shift/rounding conventions over the full 10-bit
-reference domain for every creative state, then reports how far their generated
-CSY scale codes can differ.
+The Cat42 map generator establishes Q3 slope codes exactly and the Leica M11
+KY=8 endpoint has now been closed to luminance/Y by the separate endpoint
+semantics proof. This tool does NOT select the remaining hardware integer
+convention. It enumerates plausible local-coordinate, border-selection and
+signed shift/rounding conventions over the full 10-bit Y reference domain for
+every creative state, then reports how far their generated CSY scale codes can
+differ.
 
 No image fitting and no renderer changes are performed.
 """
@@ -71,6 +73,8 @@ def main():
     a=ap.parse_args(); data=a.unpacked.read_bytes(); dig=hashlib.sha256(data).hexdigest()
     if dig != EXPECTED_UNPACKED_SHA: raise ValueError(f'unexpected SHA {dig}')
     rows=[r for r in decode_cat42(data) if -3 <= r.state <= 3]
+    if any(r.csyky != 8 for r in rows):
+        raise AssertionError('creative Cat42 KY no longer fixed at 8')
 
     variants=[]
     for bm,om,rd,cl in product(
@@ -107,18 +111,14 @@ def main():
         })
     comparisons.sort(key=lambda x:(x['max_abs_code_diff'],x['mean_abs_code_diff'],x['nonzero_points']))
 
-    # Pairwise envelope across all plausible variants at each point.
-    envelope=[]; global_max_span=0; global_span_points=0
+    global_max_span=0; global_span_points=0
     state_summaries=[]
     for r in rows:
-        spans=[]; max_locs=[]
+        spans=[]
         for x in range(1024):
             vv=[v['values'][r.state][x] for v in variants]
             span=max(vv)-min(vv); spans.append(span)
-            if span>global_max_span:
-                global_max_span=span; max_locs=[(r.state,x,min(vv),max(vv))]
-            elif span==global_max_span and span>0:
-                max_locs.append((r.state,x,min(vv),max(vv)))
+            global_max_span=max(global_max_span,span)
             if span: global_span_points += 1
         state_summaries.append({
             'state':r.state,
@@ -128,7 +128,6 @@ def main():
             'nonzero_span_pct':100.0*sum(1 for x in spans if x)/len(spans),
             'at_borders':{str(x):{'min':min(v['values'][r.state][x] for v in variants),'max':max(v['values'][r.state][x] for v in variants)} for x in r.border},
         })
-    # recompute global max locations cleanly
     locs=[]
     for r in rows:
         for x in range(1024):
@@ -136,8 +135,9 @@ def main():
             if max(vv)-min(vv)==global_max_span:
                 locs.append({'state':r.state,'x':x,'min':min(vv),'max':max(vv)})
 
-    # Restrict to the most physically conventional origin (segment_start) to
-    # distinguish rounding/border uncertainty from deliberately off-by-one probes.
+    # Restrict to the structurally preferred local origin. This isolates the
+    # unresolved border/rounding/clip ambiguity from deliberate ±1 origin
+    # stress probes.
     conventional=[v for v in variants if v['origin_mode']=='segment_start']
     conv_states=[]; conv_global=0
     for r in rows:
@@ -150,8 +150,9 @@ def main():
                             'nonzero_points':sum(1 for z in spans if z)})
 
     rep={
-        'schema':'m11camera.research.cat42_rounding_boundary.v1',
+        'schema':'m11camera.research.cat42_rounding_boundary.v2',
         'sha256':dig,
+        'reference_axis':'luminance/Y (KY=8 endpoint closed by separate endpoint-semantics proof)',
         'baseline':baseline['name'],
         'variant_count':len(variants),
         'comparisons_to_baseline':comparisons,
@@ -159,6 +160,7 @@ def main():
         'conventional_segment_start_envelope':{'global_max_span_codes':conv_global,'states':conv_states},
         'code_to_scale_note':'If CSYOF code is interpreted as code/512, one code equals 1/512 = 0.001953125 scale.',
         'evidence_boundary':{
+            'ky8_endpoint':'closed_to_luminance_Y_for_Leica_M11',
             'q3_generator':'established_from_28_of_28_gain_codes',
             'hardware_rounding':'open',
             'hardware_border_rule':'open',
@@ -168,7 +170,7 @@ def main():
     }
 
     lines=['# M11-P Cat42 rounding / boundary ambiguity sweep','',
-           f'- exact SHA-256: `{dig}`',f'- variants enumerated: `{len(variants)}`',
+           f'- exact SHA-256: `{dig}`','- reference axis: **luminance/Y** (`KY=8` endpoint closed independently)',f'- variants enumerated: `{len(variants)}`',
            f'- baseline: `{baseline["name"]}`','',
            'One CSY scale code corresponds to `1/512 = 0.001953125` if direct code/512 decoding is used.','',
            '## Conventional local-origin envelope','',
@@ -185,7 +187,7 @@ def main():
     for x in comparisons[:16]:
         lines.append(f"- `{x['name']}`: max `{x['max_abs_code_diff']}` code, mean `{x['mean_abs_code_diff']:.6f}`, changed `{x['nonzero_points']}` points ({x['nonzero_pct']:.3f}%), boundary changes `{x['boundary_nonzero_points']}`")
     lines += ['', '## Evidence boundary','',
-              'This sweep quantifies implementation ambiguity; it does not identify the hardware convention. A small envelope would mean endpoint/reference selection dominates photographic behavior, while a large envelope would justify further integer-datapath reverse engineering before rendering.', '']
+              'This sweep quantifies the remaining integer implementation ambiguity; it does not identify the hardware convention. The Y endpoint and Q3 generator are independently closed, while exact border ownership and signed rounding remain open.', '']
     a.json.parent.mkdir(parents=True,exist_ok=True); a.markdown.parent.mkdir(parents=True,exist_ok=True)
     a.json.write_text(json.dumps(rep,indent=2)+'\n'); a.markdown.write_text('\n'.join(lines)+'\n')
     print(a.markdown)
