@@ -40,7 +40,8 @@ public final class MainActivity extends Activity {
         scope.setText("Offline DNG research renderer foundation. Capture integration is intentionally deferred until controlled-render parity is stable.\n\n" +
                 M11MatrixCore.thirdTargetSummary() + "\n\n" +
                 "Third-matrix consumer placement: UNRESOLVED / not hard-wired.\n" +
-                "CC1 selection: exact firmware ISO bands only; no nearest-band guessing.");
+                "CC1 selection: exact firmware ISO bands only; no nearest-band guessing.\n" +
+                "Native RAW boundary: pinned LibRaw 0.22.1 open/identify only; pixel unpack and AHD remain disabled.");
         body.addView(scope);
 
         Button open = new Button(this);
@@ -49,7 +50,7 @@ public final class MainActivity extends Activity {
         body.addView(open);
 
         status = new TextView(this);
-        status.setText("No DNG selected. Metadata/source-transform/ISO-band validation is ready.");
+        status.setText("No DNG selected. Java metadata/source-transform/ISO validation and native LibRaw open/identify are ready.");
         status.setTextIsSelectable(true);
         body.addView(status);
 
@@ -80,7 +81,7 @@ public final class MainActivity extends Activity {
         } catch (SecurityException ignored) {
             // Some providers grant temporary access only; sufficient for this session.
         }
-        status.setText("Reading DNG metadata…");
+        status.setText("Reading Java DNG metadata and native LibRaw identification…");
         new Thread(() -> inspectDng(uri), "m11-dng-inspect").start();
     }
 
@@ -90,11 +91,19 @@ public final class MainActivity extends Activity {
             StringBuilder s = new StringBuilder(describeDocument(uri));
             try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r")) {
                 if (pfd == null) throw new IllegalStateException("content provider returned null file descriptor");
+
+                // Native identify owns an internal dup(fd) and uses pread-backed seek semantics,
+                // so this call neither consumes nor transfers ownership of the picker descriptor.
+                // It intentionally stops at LibRaw::open_datastream(): no unpack/AHD/render.
+                String nativeIdentify = M11NativeRawBridge.identifyFd(pfd.getFd());
+                s.append("\n\nNative LibRaw open/identify — independent metadata view\n")
+                        .append(nativeIdentify);
+
                 try (FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
                      FileChannel channel = in.getChannel()) {
                     DngMetadataReader.Metadata meta = DngMetadataReader.read(channel);
                     DngIsoReader.Result iso = DngIsoReader.read(channel);
-                    s.append("\n\nDNG source metadata\n")
+                    s.append("\n\nJava TIFF/DNG metadata — independent metadata view\n")
                             .append("make=").append(meta.make).append('\n')
                             .append("model=").append(meta.model).append('\n')
                             .append("uniqueCameraModel=").append(meta.uniqueCameraModel).append('\n')
@@ -137,7 +146,12 @@ public final class MainActivity extends Activity {
                     }
                 }
             }
-            s.append("\n\nRAW decode/demosaic is intentionally not enabled yet: Android parity with the current LibRaw/AHD oracle must be proven first.");
+            s.append("\n\nBoundary status\n")
+                    .append("LibRaw open/identify: enabled for diagnostics only.\n")
+                    .append("RAW unpack: DISABLED.\n")
+                    .append("AHD demosaic: DISABLED.\n")
+                    .append("M11 renderer hookup to native RAW pixels: DISABLED.\n")
+                    .append("Next proof required: same-byte Xiaomi DNG native-vs-rawpy pixel parity.");
             result = s.toString();
         } catch (Exception e) {
             result = "DNG inspection failed\n" + e.getClass().getSimpleName() + ": " + e.getMessage();
