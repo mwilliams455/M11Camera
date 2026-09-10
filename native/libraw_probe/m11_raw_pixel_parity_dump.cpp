@@ -1,7 +1,6 @@
 #include <libraw/libraw.h>
 
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -57,14 +56,19 @@ int main(int argc, char **argv) {
     if (rc != LIBRAW_SUCCESS) fail("unpack: " + std::string(LibRaw::strerror(rc)));
     if (raw.imgdata.rawdata.raw_image == nullptr) fail("fixture did not unpack to flat Bayer raw_image");
 
-    const auto &sizes = raw.imgdata.sizes;
+    const unsigned mosaic_width = raw.imgdata.sizes.width;
+    const unsigned mosaic_height = raw.imgdata.sizes.height;
+    const unsigned raw_width = raw.imgdata.sizes.raw_width;
+    const unsigned top_margin = raw.imgdata.sizes.top_margin;
+    const unsigned left_margin = raw.imgdata.sizes.left_margin;
     const std::uint16_t *raw_image = raw.imgdata.rawdata.raw_image;
+
     std::ofstream mosaic(out_dir / "mosaic_u16le.bin", std::ios::binary);
     if (!mosaic) fail("could not create mosaic dump");
-    for (unsigned y = 0; y < sizes.height; ++y) {
-        const size_t row = static_cast<size_t>(y + sizes.top_margin) * sizes.raw_width;
-        for (unsigned x = 0; x < sizes.width; ++x) {
-            const size_t index = row + x + sizes.left_margin;
+    for (unsigned y = 0; y < mosaic_height; ++y) {
+        const size_t row = static_cast<size_t>(y + top_margin) * raw_width;
+        for (unsigned x = 0; x < mosaic_width; ++x) {
+            const size_t index = row + x + left_margin;
             writeU16LE(mosaic, raw_image[index]);
         }
     }
@@ -99,8 +103,8 @@ int main(int argc, char **argv) {
     meta << "schema=m11camera.raw_pixel_parity.v1\n";
     meta << "producer=direct-libraw\n";
     meta << "librawVersion=" << LibRaw::version() << '\n';
-    meta << "mosaicWidth=" << sizes.width << '\n';
-    meta << "mosaicHeight=" << sizes.height << '\n';
+    meta << "mosaicWidth=" << mosaic_width << '\n';
+    meta << "mosaicHeight=" << mosaic_height << '\n';
     meta << "outputWidth=" << image->width << '\n';
     meta << "outputHeight=" << image->height << '\n';
     meta << "outputColors=" << image->colors << '\n';
