@@ -23,12 +23,15 @@ set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${M11_LIBRAW_CMAKE_PATH}" "${CMAKE_BINARY_DIR}/libraw")
 
-# m11_raw_jni.cpp is the user-selected DNG path and remains open/identify-only.
-# m11_raw_selftest_jni.cpp may unpack/AHD only after its independent hard gate
-# proves the input is the generated 32x32 synthetic fixture.
+# m11_raw_jni.cpp is the original user-selected DNG path and remains
+# open/identify-only. m11_raw_selftest_jni.cpp may unpack/AHD only after its
+# exact synthetic-fixture gate. m11_realraw_probe_jni.cpp is a separate,
+# explicitly selected diagnostic path and may unpack/AHD only after its narrow
+# real-Xiaomi metadata/decoder gate. None of these paths invokes the M11 renderer.
 add_library(m11rawjni SHARED
     m11_raw_jni.cpp
     m11_raw_selftest_jni.cpp
+    m11_realraw_probe_jni.cpp
 )
 target_compile_features(m11rawjni PRIVATE cxx_std_17)
 target_compile_options(m11rawjni PRIVATE -fvisibility=hidden)
