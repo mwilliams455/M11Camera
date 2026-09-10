@@ -1,0 +1,86 @@
+name: R2A M11 Cat42 scale encoding
+
+on:
+  push:
+    branches: [work/render1g-cat42c1a-orient1a]
+    paths:
+      - '.github/workflows/r2a-m11-cat42-scale-encoding.yml'
+      - 'tools/analyze_m11_cat42_scale_encoding.py'
+      - 'tools/analyze_m11_cat42_csp_arithmetic.py'
+      - 'tools/extract_m11p_forensics.py'
+      - 'tools/decompress_m11.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Acquire exact hash-gated M11-P updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/154.0 Safari/537.36'
+          expected_size='63621633'
+          expected_sha='0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83'
+          out=/tmp/LEICA_M11-P_2.6.1.FW
+          verify() { [ -f "$out" ] && [ "$(stat -c%s "$out")" = "$expected_size" ] && [ "$(sha256sum "$out"|awk '{print $1}')" = "$expected_sha" ]; }
+          rm -f "$out"
+          for url in \
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW' \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'; do
+            curl --http1.1 -L --fail --retry 1 --retry-all-errors -A "$ua" -e 'https://leica-camera.com/en-GB/photography/cameras/m/m11-p-black/downloads' -o "$out" "$url" || true
+            if verify; then break; fi
+          done
+          if ! verify; then
+            popup='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+            curl --http1.1 -L --fail -A "$ua" -o /tmp/tld.html "$popup"
+            python - <<'PY' >/tmp/tld_urls.txt
+          import re
+          from pathlib import Path
+          from html import unescape
+          from urllib.parse import urljoin
+          base='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+          t=Path('/tmp/tld.html').read_text(errors='replace'); out=[]
+          for raw in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''',t,re.I):
+              u=urljoin(base,unescape(raw)); l=u.lower()
+              if ('fichiers.touslesdrivers.com' in l or 'leica-camera.com' in l) and ('84657' in l or '.fw' in l) and u not in out: out.append(u)
+          print('\n'.join(out))
+          PY
+            while IFS= read -r url; do
+              [ -n "$url" ] || continue
+              rm -f "$out"
+              curl --http1.1 -L --fail -A "$ua" -e "$popup" -o "$out" "$url" || true
+              if verify; then break; fi
+            done </tmp/tld_urls.txt
+          fi
+          verify
+          echo "$expected_sha  $out" | sha256sum -c -
+      - name: Decompress and verify exact image
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/decompress_m11.py /tmp/LEICA_M11-P_2.6.1.FW -o /tmp/M11P.bin
+          test "$(stat -c%s /tmp/M11P.bin)" = '97644400'
+          echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P.bin' | sha256sum -c -
+      - name: Analyze Cat42 scale encoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cat42-scale
+          python tools/analyze_m11_cat42_scale_encoding.py /tmp/M11P.bin \
+            --json /tmp/cat42-scale/cat42_scale_encoding.json \
+            --markdown /tmp/cat42-scale/cat42_scale_encoding.md
+          cat /tmp/cat42-scale/cat42_scale_encoding.md
+      - name: Upload derived scale proof only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-cat42-scale-encoding
+          path: /tmp/cat42-scale/*
+          retention-days: 14
+          if-no-files-found: warn
