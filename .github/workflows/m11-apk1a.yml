@@ -113,23 +113,36 @@ jobs:
           grep -q '#define LIBRAW_MINOR_VERSION 22' "$M11_LIBRAW_PATH/libraw/libraw_version.h"
           grep -q '#define LIBRAW_PATCH_VERSION 1' "$M11_LIBRAW_PATH/libraw/libraw_version.h"
 
-      - name: Audit selected-DNG JNI remains identify-only and self-test is gated
+      - name: Audit RAW JNI boundaries and decode gates
         run: |
           set -euo pipefail
+          # The original user-selected identify path must remain decode-free.
           ! grep -nE '\.(unpack|dcraw_process|dcraw_make_mem_image|raw2image)\s*\(' \
             native/libraw_probe/m11_open_identify_core.h \
             app/src/main/cpp/m11_raw_jni.cpp
           grep -q 'open_datastream' native/libraw_probe/m11_open_identify_core.h
           python - <<'PY'
           from pathlib import Path
-          p = Path('app/src/main/cpp/m11_raw_selftest_jni.cpp').read_text()
-          gate = p.index('metadata/decoder gate failed')
-          unpack = p.index('raw.unpack()')
-          process = p.index('raw.dcraw_process()')
-          assert gate < unpack < process
-          assert 'kFixtureSize = 2382' in p
-          assert 'kWidth = 32' in p and 'kHeight = 32' in p
-          assert 'APK1A Synthetic DNG' in p
+
+          synthetic = Path('app/src/main/cpp/m11_raw_selftest_jni.cpp').read_text()
+          s_gate = synthetic.index('metadata/decoder gate failed')
+          s_unpack = synthetic.index('raw.unpack()')
+          s_process = synthetic.index('raw.dcraw_process()')
+          assert s_gate < s_unpack < s_process
+          assert 'kFixtureSize = 2382' in synthetic
+          assert 'kWidth = 32' in synthetic and 'kHeight = 32' in synthetic
+          assert 'APK1A Synthetic DNG' in synthetic
+
+          real = Path('app/src/main/cpp/m11_realraw_probe_jni.cpp').read_text()
+          r_gate = real.index('metadata/decoder gate failed')
+          r_unpack = real.index('raw.unpack()')
+          r_process = real.index('raw.dcraw_process()')
+          assert r_gate < r_unpack < r_process
+          assert 'kWidth = 4096' in real and 'kHeight = 3072' in real
+          assert '25010PN30G' in real
+          assert 'packed_dng_load_raw()' in real
+          assert 'm11RendererInvoked=false' in real
+          assert 'applyRawpy0271OracleParams(raw.imgdata.params, false)' in real
           PY
 
       - name: Set up Gradle 9.6.0
