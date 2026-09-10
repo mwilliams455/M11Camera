@@ -1,0 +1,78 @@
+name: M11 RENDER1A Native Renderer Parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - work/apk1a-render1a
+    paths:
+      - 'native/m11_renderer/**'
+      - 'tests/native/**'
+      - 'renderer/reference/**'
+      - 'tools/generate_m11_android_python_parity_fixture.py'
+      - '.github/workflows/m11-render1a-native-parity.yml'
+
+jobs:
+  native-renderer-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install renderer oracle dependency
+        run: python -m pip install --disable-pip-version-check numpy
+
+      - name: Generate fresh Python stage oracle
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python tools/generate_m11_android_python_parity_fixture.py \
+            --out work/m11_python_native_parity_v1.b64
+          base64 --decode work/m11_python_native_parity_v1.b64 \
+            > work/m11_python_native_parity_v1.bin
+          test -s work/m11_python_native_parity_v1.bin
+
+      - name: Compile native frozen renderer parity gate
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            -Inative/m11_renderer \
+            tests/native/m11_reference_renderer_parity_test.cpp \
+            -o work/m11_reference_renderer_parity_test
+
+      - name: Compare C++ renderer to Python stage oracle
+        run: |
+          set -euo pipefail
+          work/m11_reference_renderer_parity_test \
+            work/m11_python_native_parity_v1.bin \
+            | tee M11_RENDER1A_NATIVE_PARITY.txt
+          grep -q 'native_renderer_parity=true' M11_RENDER1A_NATIVE_PARITY.txt
+          grep -q 'cases=147' M11_RENDER1A_NATIVE_PARITY.txt
+          grep -q 'third_sro_applied=false' M11_RENDER1A_NATIVE_PARITY.txt
+
+      - name: Audit evidence boundary
+        run: |
+          set -euo pipefail
+          ! grep -RniE 'third.?sro|212, *-165, *-71' native/m11_renderer || {
+            echo 'Third-SRO content must not enter the native renderer core.' >&2
+            exit 1
+          }
+          grep -q '77.0 / 256.0, 150.0 / 256.0, 29.0 / 256.0' \
+            native/m11_renderer/m11_reference_renderer_core.h
+          grep -q '77.0 / 255.0, 149.0 / 255.0, 29.0 / 255.0' \
+            native/m11_renderer/m11_reference_renderer_core.h
+
+      - name: Upload RENDER1A parity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-RENDER1A-native-parity
+          path: |
+            M11_RENDER1A_NATIVE_PARITY.txt
+            work/m11_python_native_parity_v1.bin
+          if-no-files-found: ignore
