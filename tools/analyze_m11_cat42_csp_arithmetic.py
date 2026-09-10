@@ -2,14 +2,15 @@
 """Analyze Leica M11-P Category-42 / Milbeaut CSP arithmetic constraints.
 
 This tool operates only on the verified unpacked M11-P 2.6.1 image and emits
-DERIVED metadata. It does not reproduce firmware bytes.  The purpose is to use
+DERIVED metadata. It does not reproduce firmware bytes. The purpose is to use
 all creative saturation states together to test fixed-point/segment hypotheses
 without fitting a single photograph or a single Standard map.
 
 Important evidence boundary:
 - Category 42 -> R2yCtrlCs is a strong structural mapping.
 - This analyzer does NOT assume CSYKY endpoint direction or chroma magnitude.
-- Continuity scores are diagnostics, not proof that hardware enforces continuity.
+- Continuity scores and compact algebraic fits are diagnostics, not proof that
+  hardware implements those exact equations.
 """
 from __future__ import annotations
 
@@ -101,7 +102,7 @@ def signed_shift(value: int, q: int, mode: str) -> int:
 def continuity_candidates(rows: list[Cat42]) -> list[dict]:
     creative = [r for r in rows if -3 <= r.state <= 3]
     out: list[dict] = []
-    # Only test transitions 0->1, 1->2, 2->3.  The final segment has no next
+    # Only test transitions 0->1, 1->2, 2->3. The final segment has no next
     # offset against which to form a continuity residual.
     for anchoring in ("local", "absolute"):
         for q in range(0, 13):
@@ -177,19 +178,89 @@ def affine_sequence(values: list[int]) -> dict:
     return {"values": values, "first_differences": diffs, "second_differences": second}
 
 
+def creative_scale_constraints(creative: list[Cat42]) -> dict:
+    # The plateau is offset[1] == offset[2] in all seven creative states.
+    # Test the particularly compact Q9 ladder suggested by the recovered codes:
+    # state -3..+3 -> 0.70, 0.85, 1.00, 1.15, 1.30, 1.45, 1.60.
+    rows = []
+    exact = True
+    for r in creative:
+        plateau = r.offset[1]
+        target = 1.15 + 0.15 * r.state
+        target_q9 = int(math.floor(target * 512.0 + 0.5))
+        match = plateau + 1 == target_q9
+        exact = exact and match
+        rows.append(
+            {
+                "state": r.state,
+                "plateau_code": plateau,
+                "plateau_plus_one": plateau + 1,
+                "target_scale": target,
+                "round_target_times_512": target_q9,
+                "plus_one_matches_target_q9": match,
+                "direct_code_over_512": plateau / 512.0,
+                "plus_one_over_512": (plateau + 1) / 512.0,
+            }
+        )
+
+    outer = [
+        {
+            "state": r.state,
+            "border0": r.border[0],
+            "border2": r.border[2],
+            "sum": r.border[0] + r.border[2],
+            "distance_from_1023": r.border[0] + r.border[2] - 1023,
+        }
+        for r in creative
+    ]
+
+    # Search a tiny compact affine/floor family for offset[3] as a function of
+    # the plateau. This is descriptive only: exact fit does not prove hardware
+    # computes offset[3] at runtime from offset[1].
+    compact_o3 = []
+    for den in range(1, 17):
+        for num in range(-32, 33):
+            for c in range(0, 1025):
+                if all((num * r.offset[1] + c) // den == r.offset[3] for r in creative):
+                    compact_o3.append({"numerator": num, "constant": c, "denominator": den})
+                    break
+    compact_o3.sort(key=lambda x: (x["denominator"], abs(x["numerator"]), x["constant"]))
+
+    return {
+        "plateau_q9_ladder": {
+            "hypothesis": "plateau_code + 1 == round(512 * (1.15 + 0.15*state))",
+            "matches_all_7": exact,
+            "rows": rows,
+            "interpretation": "This exactly identifies a designed Q9-like creative-state ladder, but the +1 register-code semantics still require hardware/consumer confirmation, especially because the monochrome map stores zero rather than -1.",
+        },
+        "outer_border_complement": {
+            "hypothesis": "CSYBD0 + CSYBD2 ~= 1023",
+            "rows": outer,
+            "exact_1023_count": sum(x["sum"] == 1023 for x in outer),
+            "within_one_count": sum(abs(x["distance_from_1023"]) <= 1 for x in outer),
+            "interpretation": "The outer thresholds are mirror-symmetric about the midpoint of a 10-bit axis to within one code. This is a strong reference-axis constraint but does not alone distinguish full-range luminance from a full-range encoded chroma metric.",
+        },
+        "offset3_compact_fits": {
+            "top_20": compact_o3[:20],
+            "interpretation": "Exact compact fits are generator clues only; the firmware may store all four offsets independently.",
+        },
+    }
+
+
 def report(rows: list[Cat42]) -> dict:
     creative = [r for r in rows if -3 <= r.state <= 3]
     if len(creative) != 7:
         raise ValueError(f"expected 7 creative states, found {len(creative)}")
     ranked = continuity_candidates(rows)
     return {
-        "schema": "m11camera.research.cat42_csp_arithmetic.v1",
+        "schema": "m11camera.research.cat42_csp_arithmetic.v2",
         "evidence_boundary": {
             "category42_to_milbeaut_csp": "strong_structural_inference",
             "csyky_endpoint_direction": "open",
             "chroma_reference_magnitude": "open",
             "piecewise_equation": "open",
             "continuity_test_is_proof": False,
+            "compact_generator_fit_is_proof": False,
         },
         "maps": [
             {
@@ -222,6 +293,7 @@ def report(rows: list[Cat42]) -> dict:
         "offset_code_over_512": {
             str(r.state): [x / 512.0 for x in r.offset] for r in creative
         },
+        "creative_scale_constraints": creative_scale_constraints(creative),
         "continuity_hypothesis_search": {
             "description": "Ranks local-vs-absolute anchoring, Q0..Q12 gains, border +/-2 conventions and three signed shifts by continuity residual across all 7 creative states. Diagnostic only.",
             "top_20": ranked[:20],
@@ -237,25 +309,63 @@ def to_markdown(rep: dict) -> str:
     lines = [
         "# M11-P Category-42 CSP arithmetic constraints",
         "",
-        "This is a derived diagnostic report. Continuity ranking is not proof of the hardware equation.",
+        "This is a derived diagnostic report. Continuity ranking and compact algebraic fits are not proof of the hardware equation.",
         "",
-        "## Creative-state controls",
+        "## Category-42 controls",
         "",
         "| state | EN | KY | TBL | offsets | gains | borders | YRV | CRV | CFIX | YOF | COFB | COFR |",
         "|---:|---:|---:|---:|---|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for r in rep["maps"]:
-        if not (-3 <= r["state"] <= 3):
-            continue
         lines.append(
             f"| {r['state']:+d} | {r['csy_enable']} | {r['csyky']} | {r['csytbl']} | "
             f"{r['offset']} | {r['gain']} | {r['border']} | {r['y_rev']} | {r['c_rev']} | "
             f"{r['c_fixed_enable']} | {r['y_offset']} | {r['cb_offset']} | {r['cr_offset']} |"
         )
-    lines += ["", "## Constant fields across -3..+3", ""]
+    lines += ["", "## Constant fields across creative states -3..+3", ""]
     for name, info in rep["creative_state_invariants"].items():
         lines.append(f"- `{name}`: constant={info['constant']} value={info['constant_value']} values={info['values_by_state_-3_to_+3']}")
-    lines += ["", "## Best continuity candidates", ""]
+
+    scale = rep["creative_scale_constraints"]["plateau_q9_ladder"]
+    lines += [
+        "",
+        "## Q9-like creative plateau ladder",
+        "",
+        f"Hypothesis: `{scale['hypothesis']}`; matches all seven states: **{scale['matches_all_7']}**.",
+        "",
+        "| state | plateau | plateau+1 | target scale | round(target*512) | match |",
+        "|---:|---:|---:|---:|---:|:---:|",
+    ]
+    for x in scale["rows"]:
+        lines.append(
+            f"| {x['state']:+d} | {x['plateau_code']} | {x['plateau_plus_one']} | "
+            f"{x['target_scale']:.2f} | {x['round_target_times_512']} | {x['plus_one_matches_target_q9']} |"
+        )
+    lines += ["", scale["interpretation"], ""]
+
+    outer = rep["creative_scale_constraints"]["outer_border_complement"]
+    lines += [
+        "## Outer-border complement constraint",
+        "",
+        f"`CSYBD0 + CSYBD2 == 1023` in {outer['exact_1023_count']}/7 states and is within one code in {outer['within_one_count']}/7 states.",
+        "",
+    ]
+    for x in outer["rows"]:
+        lines.append(f"- state {x['state']:+d}: {x['border0']} + {x['border2']} = {x['sum']}")
+    lines += ["", outer["interpretation"], ""]
+
+    fits = rep["creative_scale_constraints"]["offset3_compact_fits"]["top_20"]
+    if fits:
+        f0 = fits[0]
+        lines += [
+            "## Compact offset[3] generator clue",
+            "",
+            f"A compact exact fit across all seven states is `offset3 = floor(({f0['numerator']}*plateau + {f0['constant']})/{f0['denominator']})`.",
+            "This is a stored-map generator clue, not evidence that CSP hardware computes offset3 from the plateau.",
+            "",
+        ]
+
+    lines += ["## Best continuity candidates", ""]
     for i, x in enumerate(rep["continuity_hypothesis_search"]["top_20"][:10], 1):
         lines.append(
             f"{i}. `{x['anchoring']}` Q{x['gain_fractional_bits']} delta={x['boundary_delta']:+d} "
@@ -271,7 +381,7 @@ def to_markdown(rep: dict) -> str:
         "",
         "## Interpretation boundary",
         "",
-        "Low continuity residual can eliminate poor hypotheses but cannot establish CSYKY endpoint direction, chroma magnitude, table selection semantics, or the exact multiplier/rounding datapath by itself.",
+        "Low continuity residual can eliminate poor hypotheses but cannot establish CSYKY endpoint direction, chroma magnitude, table selection semantics, the output coefficient encoding, or the exact multiplier/rounding datapath by itself.",
         "",
     ]
     return "\n".join(lines)
