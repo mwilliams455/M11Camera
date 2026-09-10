@@ -20,6 +20,7 @@ constexpr unsigned kWidth = 4096;
 constexpr unsigned kHeight = 3072;
 constexpr unsigned kFilters = 0xb4b4b4b4u;
 constexpr unsigned kMaximum = 1023;
+constexpr unsigned kDngBlackReference = 64;
 constexpr const char *kMake = "Xiaomi";
 constexpr const char *kModel = "25010PN30G";
 constexpr const char *kDecoder = "packed_dng_load_raw()";
@@ -162,6 +163,14 @@ double elapsedMs(std::chrono::steady_clock::time_point start,
     return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
+std::array<unsigned, 4> cblack4(const libraw_colordata_t &color) {
+    return {color.cblack[0], color.cblack[1], color.cblack[2], color.cblack[3]};
+}
+
+void appendCblack(std::ostringstream &out, const char *name, const std::array<unsigned, 4> &v) {
+    out << name << "=" << v[0] << "," << v[1] << "," << v[2] << "," << v[3] << "\n";
+}
+
 std::string runRealXiaomiProbe(JNIEnv *env, int source_fd) {
     m11raw::FdDatastream stream(source_fd);
     if (!stream.valid()) throwState(env, "real Xiaomi RAW probe: invalid fd");
@@ -182,9 +191,7 @@ std::string runRealXiaomiProbe(JNIEnv *env, int source_fd) {
     if (raw.get_decoder_info(&decoder) != LIBRAW_SUCCESS)
         throwState(env, "real Xiaomi RAW probe: decoder identity unavailable");
 
-    // REAL-DNG PROMOTION GATE. This is intentionally narrower than generic LibRaw:
-    // only the Xiaomi 15 Ultra DNG shape already observed in identify-only testing
-    // may proceed to pixel decode. The existing identify JNI remains decode-free.
+    // REAL-DNG PROMOTION GATE. This intentionally remains narrower than generic LibRaw.
     if (!equalsField(id.make, kMake) || !equalsField(id.model, kModel) ||
         id.raw_count != 1 || id.colors != 3 || id.filters != kFilters ||
         sizes.raw_width != kWidth || sizes.raw_height != kHeight ||
@@ -195,8 +202,11 @@ std::string runRealXiaomiProbe(JNIEnv *env, int source_fd) {
         throwState(env, "real Xiaomi RAW probe: metadata/decoder gate failed; refusing pixel decode");
     }
 
+    const unsigned pre_filters = id.filters;
     const unsigned pre_black = color.black;
     const unsigned pre_maximum = color.maximum;
+    const auto pre_cblack = cblack4(color);
+
     const auto unpack_start = std::chrono::steady_clock::now();
     rc = raw.unpack();
     const auto unpack_end = std::chrono::steady_clock::now();
@@ -205,17 +215,21 @@ std::string runRealXiaomiProbe(JNIEnv *env, int source_fd) {
     if (raw.imgdata.rawdata.raw_image == nullptr)
         throwState(env, "real Xiaomi RAW probe: flat Bayer buffer unavailable");
 
+    const unsigned post_unpack_filters = raw.imgdata.idata.filters;
     const unsigned post_black = raw.imgdata.color.black;
     const unsigned post_maximum = raw.imgdata.color.maximum;
+    const auto post_cblack = cblack4(raw.imgdata.color);
     const std::uint16_t *raw_image = raw.imgdata.rawdata.raw_image;
     Sha256 mosaic_hash;
     SampleStats mosaic_stats;
+    std::uint64_t mosaic_at_or_below_dng_black = 0;
     for (unsigned y = 0; y < kHeight; ++y) {
         const std::size_t row = static_cast<std::size_t>(y) * kWidth;
         for (unsigned x = 0; x < kWidth; ++x) {
             const std::uint16_t v = raw_image[row + x];
             mosaic_hash.updateU16LE(v);
             mosaic_stats.add(v, post_black, post_maximum);
+            if (v <= kDngBlackReference) ++mosaic_at_or_below_dng_black;
         }
     }
     const std::string mosaic_sha = mosaic_hash.finishHex();
@@ -242,41 +256,60 @@ std::string runRealXiaomiProbe(JNIEnv *env, int source_fd) {
         throwState(env, "real Xiaomi RAW probe: unexpected AHD byte count");
     }
 
+    const unsigned post_process_filters = raw.imgdata.idata.filters;
     Sha256 ahd_hash;
+    std::array<Sha256, 8> ahd_shift_hashes;
     SampleStats ahd_stats;
+    std::array<std::uint64_t, 3> channel_sum {};
+    std::array<std::uint64_t, 3> channel_sumsq {};
     const auto *pixels = reinterpret_cast<const std::uint16_t *>(image->data);
     const std::size_t samples = static_cast<std::size_t>(image->width) * image->height * image->colors;
     for (std::size_t i = 0; i < samples; ++i) {
         const std::uint16_t v = pixels[i];
         ahd_hash.updateU16LE(v);
+        for (unsigned shift = 1; shift <= 8; ++shift)
+            ahd_shift_hashes[shift - 1].updateU16LE(static_cast<std::uint16_t>(v >> shift));
         ahd_stats.add(v, 0, 65535);
+        const unsigned c = static_cast<unsigned>(i % 3u);
+        channel_sum[c] += v;
+        channel_sumsq[c] += static_cast<std::uint64_t>(v) * v;
     }
     const std::string ahd_sha = ahd_hash.finishHex();
+    std::array<std::string, 8> shifted_sha;
+    for (unsigned i = 0; i < shifted_sha.size(); ++i)
+        shifted_sha[i] = ahd_shift_hashes[i].finishHex();
 
     std::ostringstream out;
     out << std::fixed << std::setprecision(6);
-    out << "schema=m11camera.real_xiaomi_raw_probe.v1\n";
+    out << "schema=m11camera.real_xiaomi_raw_probe.v1b\n";
     out << "nativeAvailable=true\n";
     out << "librawVersion=" << runtime << "\n";
     out << "realXiaomiIdentityGate=true\n";
     out << "make=" << id.make << "\n";
     out << "model=" << id.model << "\n";
     out << "decoderName=" << decoder.decoder_name << "\n";
-    out << "filters=0x" << std::hex << id.filters << std::dec << "\n";
+    out << "preDecodeFilters=0x" << std::hex << pre_filters << std::dec << "\n";
+    out << "postUnpackFilters=0x" << std::hex << post_unpack_filters << std::dec << "\n";
+    out << "postProcessFilters=0x" << std::hex << post_process_filters << std::dec << "\n";
     out << "rawSize=" << sizes.raw_width << "x" << sizes.raw_height << "\n";
     out << "visibleSize=" << sizes.width << "x" << sizes.height << "\n";
     out << "flip=" << sizes.flip << "\n";
     out << "preUnpackBlack=" << pre_black << "\n";
     out << "preUnpackMaximum=" << pre_maximum << "\n";
+    appendCblack(out, "preUnpackCblack", pre_cblack);
     out << "postUnpackBlack=" << post_black << "\n";
     out << "postUnpackMaximum=" << post_maximum << "\n";
+    appendCblack(out, "postUnpackCblack", post_cblack);
     out << "unpackMs=" << elapsedMs(unpack_start, unpack_end) << "\n";
     out << "mosaicSamples=" << mosaic_stats.count << "\n";
+    out << "mosaicSum=" << mosaic_stats.sum << "\n";
     out << "mosaicSha256=" << mosaic_sha << "\n";
     out << "mosaicMin=" << mosaic_stats.minimum << "\n";
     out << "mosaicMax=" << mosaic_stats.maximum << "\n";
     out << "mosaicMean=" << (mosaic_stats.count ? static_cast<double>(mosaic_stats.sum) / mosaic_stats.count : 0.0) << "\n";
-    out << "mosaicAtOrBelowBlack=" << mosaic_stats.at_or_below_black << "\n";
+    out << "mosaicAtOrBelowLibRawBlack=" << mosaic_stats.at_or_below_black << "\n";
+    out << "dngBlackReference=" << kDngBlackReference << "\n";
+    out << "mosaicAtOrBelowDngBlack=" << mosaic_at_or_below_dng_black << "\n";
     out << "mosaicAtOrAboveMaximum=" << mosaic_stats.at_or_above_maximum << "\n";
     out << "rawpyOracleParamsApplied=true\n";
     out << "halfSize=false\n";
@@ -286,11 +319,20 @@ std::string runRealXiaomiProbe(JNIEnv *env, int source_fd) {
     out << "ahdColors=" << image->colors << "\n";
     out << "ahdBits=" << image->bits << "\n";
     out << "ahdSamples=" << ahd_stats.count << "\n";
+    out << "ahdSum=" << ahd_stats.sum << "\n";
     out << "ahdSha256=" << ahd_sha << "\n";
+    for (unsigned shift = 1; shift <= 8; ++shift)
+        out << "ahdShift" << shift << "Sha256=" << shifted_sha[shift - 1] << "\n";
+    for (unsigned c = 0; c < 3; ++c) {
+        out << "ahdChannel" << c << "Sum=" << channel_sum[c] << "\n";
+        out << "ahdChannel" << c << "SumSq=" << channel_sumsq[c] << "\n";
+    }
     out << "ahdMin=" << ahd_stats.minimum << "\n";
     out << "ahdMax=" << ahd_stats.maximum << "\n";
     out << "ahdMean=" << (ahd_stats.count ? static_cast<double>(ahd_stats.sum) / ahd_stats.count : 0.0) << "\n";
     out << "nativeRealXiaomiPixelDecodeCompleted=true\n";
+    out << "realXiaomiMosaicByteParityAwaitingOracle=true\n";
+    out << "realXiaomiAhdNumericalParityAwaitingOracle=true\n";
     out << "realXiaomiPixelParityProven=false\n";
     out << "m11RendererInvoked=false\n";
 
