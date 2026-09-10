@@ -1,0 +1,108 @@
+name: M11 APK1A Open Identify Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - m11-apk1a
+    paths:
+      - 'native/libraw_probe/m11_fd_datastream.h'
+      - 'native/libraw_probe/m11_open_identify_core.h'
+      - 'native/libraw_probe/m11_open_identify_test.cpp'
+      - 'tools/generate_m11_synthetic_dng.py'
+      - '.github/workflows/m11-apk1a-open-identify-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  host-open-identify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned LibRaw sources and CMake wrapper
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git work/LibRaw
+          git -C work/LibRaw checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git work/LibRaw-cmake
+          git -C work/LibRaw-cmake checkout --detach "$LIBRAW_CMAKE_COMMIT"
+          test "$(git -C work/LibRaw rev-parse HEAD)" = "$LIBRAW_COMMIT"
+          test "$(git -C work/LibRaw-cmake rev-parse HEAD)" = "$LIBRAW_CMAKE_COMMIT"
+          grep -q '#define LIBRAW_MINOR_VERSION 22' work/LibRaw/libraw/libraw_version.h
+          grep -q '#define LIBRAW_PATCH_VERSION 1' work/LibRaw/libraw/libraw_version.h
+
+      - name: Generate deterministic synthetic DNG
+        run: |
+          set -euo pipefail
+          python tools/generate_m11_synthetic_dng.py --out work/apk1a_synthetic.dng | tee work/synthetic_dng.txt
+          test -s work/apk1a_synthetic.dng
+          grep -q 'synthetic_only=true' work/synthetic_dng.txt
+
+      - name: Audit identify-only source boundary
+        run: |
+          set -euo pipefail
+          ! grep -nE '\.(unpack|dcraw_process|dcraw_make_mem_image|raw2image)\s*\(' \
+            native/libraw_probe/m11_open_identify_core.h \
+            app/src/main/cpp/m11_raw_jni.cpp
+          grep -q 'open_datastream' native/libraw_probe/m11_open_identify_core.h
+
+      - name: Configure host open-identify probe
+        run: |
+          set -euo pipefail
+          mkdir -p work/open_probe
+          cat > work/open_probe/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.22)
+          project(m11_open_identify_probe LANGUAGES C CXX)
+
+          set(LIBRAW_PATH "${CMAKE_CURRENT_LIST_DIR}/../LibRaw" CACHE STRING "" FORCE)
+          set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_OPENMP OFF CACHE BOOL "" FORCE)
+          set(ENABLE_LCMS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_JASPER OFF CACHE BOOL "" FORCE)
+          set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+          set(ENABLE_RAWSPEED OFF CACHE BOOL "" FORCE)
+          set(ENABLE_DCRAW_DEBUG OFF CACHE BOOL "" FORCE)
+          set(ENABLE_X3FTOOLS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_6BY9RPI OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_INSTALL OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
+
+          add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../LibRaw-cmake" "${CMAKE_BINARY_DIR}/libraw")
+          add_executable(m11openidentify "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe/m11_open_identify_test.cpp")
+          target_compile_features(m11openidentify PRIVATE cxx_std_17)
+          target_include_directories(m11openidentify PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe")
+          target_link_libraries(m11openidentify PRIVATE libraw::libraw)
+          CMAKE
+
+          cmake -S work/open_probe -B work/open_build -DCMAKE_BUILD_TYPE=Release | tee work/open_configure.log
+          cmake --build work/open_build --target m11openidentify --parallel 2 | tee work/open_build.log
+
+      - name: Run fd-backed LibRaw open identify
+        run: |
+          set -euo pipefail
+          exe=$(find work/open_build -name m11openidentify -type f -perm -111 -print -quit)
+          test -n "$exe"
+          "$exe" work/apk1a_synthetic.dng | tee work/open_identify.txt
+          grep -q 'librawVersion=0.22.1' work/open_identify.txt
+          grep -q 'decodeInvoked=false' work/open_identify.txt
+          grep -q 'open_identify_conformance=true' work/open_identify.txt
+
+      - name: Upload open-identify evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-APK1A-open-identify-conformance
+          path: |
+            work/synthetic_dng.txt
+            work/open_identify.txt
+            work/open_configure.log
+            work/open_build.log
+          if-no-files-found: error
+          retention-days: 14
