@@ -3,13 +3,14 @@
 
 This is a locator only. It does not alter renderer behavior. The primary goal is
 to find surviving diagnostic/help strings that could disambiguate CSYKY's Y/C
-endpoint or CSP placement. Exact code references to a string are reported when
-the flat address is directly present; absence of such a reference is not proof
-because the image also uses relocated/runtime address spaces.
+endpoint or CSP placement. Direct flat-address references are indexed in one
+aligned pass; absence of such a reference is not proof because the image also
+uses relocated/runtime address spaces.
 """
 from __future__ import annotations
 
 import argparse, hashlib, json, re, struct
+from collections import defaultdict
 from pathlib import Path
 
 from extract_m11p_forensics import EXPECTED_UNPACKED_SHA
@@ -36,14 +37,6 @@ def utf16le_strings(data: bytes, min_len=5):
         raw=m.group(); yield m.start(),raw[::2].decode('ascii','replace')
 
 
-def literal_refs(data: bytes, value: int):
-    pat=struct.pack('<I',value & 0xffffffff); out=[]; p=0
-    while True:
-        p=data.find(pat,p)
-        if p<0:return out
-        out.append(p); p+=1
-
-
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('unpacked',type=Path)
     ap.add_argument('--json',type=Path,required=True); ap.add_argument('--markdown',type=Path,required=True)
@@ -53,23 +46,26 @@ def main():
     hits=[]
     for enc,it in [('ascii',ascii_strings(data)),('utf16le',utf16le_strings(data))]:
         for off,s in it:
-            low=s.lower()
-            matched=sorted({k for k in KEYWORDS if k in low})
+            low=s.lower(); matched=sorted({k for k in KEYWORDS if k in low})
             if matched:
-                hits.append({'offset':off,'encoding':enc,'text':s[:500],'keywords':matched,
-                             'literal_xrefs':literal_refs(data,off)[:100]})
+                hits.append({'offset':off,'encoding':enc,'text':s[:500],'keywords':matched,'literal_xrefs':[]})
 
-    # Nearby strings can expose function/module labels even without keywords.
+    # ARM literal pools are word aligned. Index every aligned u32 once instead
+    # of rescanning the 97 MB image independently for every string.
+    wanted={x['offset'] for x in hits}; refs=defaultdict(list)
+    for p in range(0,len(data)-3,4):
+        v=struct.unpack_from('<I',data,p)[0]
+        if v in wanted and len(refs[v])<100:
+            refs[v].append(p)
+    for x in hits: x['literal_xrefs']=refs.get(x['offset'],[])
+
     nearby=[]
     for center,name in [(CSP_WRAPPER,'csp_wrapper'),(CSP_SETTER,'csp_setter'),(LOOKUP,'lookup'),(CORE,'resolver')]:
-        lo=max(0,center-0x8000); hi=min(len(data),center+0x8000)
-        vals=[]
+        lo=max(0,center-0x8000); hi=min(len(data),center+0x8000); vals=[]
         for off,s in ascii_strings(data[lo:hi],6):
-            abs_off=lo+off
-            vals.append({'offset':abs_off,'delta':abs_off-center,'text':s[:300]})
+            abs_off=lo+off; vals.append({'offset':abs_off,'delta':abs_off-center,'text':s[:300]})
         nearby.append({'name':name,'center':center,'strings':vals[:1000]})
 
-    # Also scan for exact public API spellings even if shorter/mixed case.
     tokens=['CSYKY','CSYCTL','CSYOF','CSYGA','CSYBD','Chroma Suppress','R2yCtrlCs','luminance/chroma']
     exact=[]
     for token in tokens:
@@ -80,14 +76,14 @@ def main():
             pos.append(p); p+=1
         exact.append({'token':token,'offsets':pos[:200],'count':len(pos)})
 
-    rep={'schema':'m11camera.research.csp_strings.v1','sha256':dig,'keyword_hits':hits,
+    rep={'schema':'m11camera.research.csp_strings.v2','sha256':dig,'keyword_hits':hits,
          'exact_api_token_hits':exact,'nearby_code_strings':nearby,
-         'boundary':'String presence can support semantics; string absence cannot disprove them.'}
+         'boundary':'String presence can support semantics; string absence cannot disprove them. Aligned flat-pointer xrefs do not cover relocated runtime addresses.'}
     lines=['# M11-P CSP semantic string/xref sweep','',f'- SHA-256: `{dig}`',
            f'- keyword-bearing strings: `{len(hits)}`','', '## Exact public-API token hits','',
            '| token | count | offsets |','|---|---:|---|']
     for x in exact: lines.append(f"| `{x['token']}` | {x['count']} | `{[hex(o) for o in x['offsets'][:30]]}` |")
-    lines += ['', '## Keyword-bearing strings','', '| offset | encoding | keywords | direct flat-pointer xrefs | text |','|---:|---|---|---|---|']
+    lines += ['', '## Keyword-bearing strings','', '| offset | encoding | keywords | aligned flat-pointer xrefs | text |','|---:|---|---|---|---|']
     for x in hits[:500]:
         txt=x['text'].replace('|','\\|').replace('\n','\\n')
         lines.append(f"| `0x{x['offset']:08x}` | {x['encoding']} | `{x['keywords']}` | `{[hex(o) for o in x['literal_xrefs'][:20]]}` | {txt} |")
