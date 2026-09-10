@@ -21,7 +21,11 @@ import java.util.Locale;
 public final class MainActivity extends Activity {
     private static final int REQUEST_IDENTIFY_DNG = 1101;
     private static final int REQUEST_REAL_RAW_PROBE = 1102;
+    private static final int REQUEST_REAL_RAW_EXPORT_SOURCE = 1103;
+    private static final int REQUEST_REAL_RAW_EXPORT_DEST = 1104;
+
     private TextView status;
+    private Uri pendingExportSource;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,7 +49,8 @@ public final class MainActivity extends Activity {
                 "Original user-selected DNG path: pinned LibRaw 0.22.1 open/identify ONLY.\n" +
                 "Bundled synthetic self-test: unpack + AHD only after exact fixture gates.\n" +
                 "Separate real-Xiaomi probe: unpack + AHD only after narrow Xiaomi metadata/decoder gates.\n" +
-                "No RAW parity probe invokes the M11 renderer.");
+                "REALRAW1C export: same gated AHD bytes may be gzip-exported only to a user-selected document for private parity analysis.\n" +
+                "No RAW parity or export path invokes the M11 renderer.");
         body.addView(scope);
 
         Button selfTest = new Button(this);
@@ -63,8 +68,13 @@ public final class MainActivity extends Activity {
         realProbe.setOnClickListener(v -> chooseDng(REQUEST_REAL_RAW_PROBE));
         body.addView(realProbe);
 
+        Button realExport = new Button(this);
+        realExport.setText("Select Xiaomi DNG — export gated AHD parity .gz");
+        realExport.setOnClickListener(v -> chooseDng(REQUEST_REAL_RAW_EXPORT_SOURCE));
+        body.addView(realExport);
+
         status = new TextView(this);
-        status.setText("Ready. Synthetic ARM parity is isolated from the explicit real-Xiaomi RAW probe. The M11 renderer remains disconnected.");
+        status.setText("Ready. Synthetic ARM parity, explicit real-Xiaomi RAW probe, and REALRAW1C derived AHD export are isolated. The M11 renderer remains disconnected.");
         status.setTextIsSelectable(true);
         body.addView(status);
 
@@ -99,26 +109,60 @@ public final class MainActivity extends Activity {
         startActivityForResult(intent, requestCode);
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if ((requestCode != REQUEST_IDENTIFY_DNG && requestCode != REQUEST_REAL_RAW_PROBE) ||
-                resultCode != RESULT_OK || data == null) return;
-        Uri uri = data.getData();
-        if (uri == null) return;
-        int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+    private void chooseExportDestination() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/gzip");
+        intent.putExtra(Intent.EXTRA_TITLE, "M11_REALRAW1C_AHD_u16le.bin.gz");
+        startActivityForResult(intent, REQUEST_REAL_RAW_EXPORT_DEST);
+    }
+
+    private void persistPermission(Intent data, Uri uri) {
+        int flags = data.getFlags() &
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
         try {
             if (flags != 0) getContentResolver().takePersistableUriPermission(uri, flags);
         } catch (SecurityException ignored) {
             // Some providers grant temporary access only; sufficient for this session.
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null) return;
+        Uri uri = data.getData();
+        if (uri == null) return;
+
+        if (requestCode == REQUEST_REAL_RAW_EXPORT_DEST) {
+            persistPermission(data, uri);
+            final Uri source = pendingExportSource;
+            pendingExportSource = null;
+            if (source == null) {
+                status.setText("REALRAW1C export cancelled: source DNG state was lost.");
+                return;
+            }
+            status.setText("Running gated real Xiaomi AHD and gzip-exporting the derived 16-bit RGB buffer…");
+            new Thread(() -> runRealRawAhdExport(source, uri), "m11-realraw-ahd-export").start();
+            return;
+        }
+
+        if (requestCode != REQUEST_IDENTIFY_DNG &&
+                requestCode != REQUEST_REAL_RAW_PROBE &&
+                requestCode != REQUEST_REAL_RAW_EXPORT_SOURCE) return;
+
+        persistPermission(data, uri);
 
         if (requestCode == REQUEST_IDENTIFY_DNG) {
             status.setText("Reading Java DNG metadata and native LibRaw identification only…");
             new Thread(() -> inspectDng(uri), "m11-dng-inspect").start();
-        } else {
+        } else if (requestCode == REQUEST_REAL_RAW_PROBE) {
             status.setText("Running explicitly selected real Xiaomi DNG through gated LibRaw unpack + AHD hash probe…");
             new Thread(() -> runRealRawProbe(uri), "m11-realraw-probe").start();
+        } else {
+            pendingExportSource = uri;
+            status.setText("Source DNG selected. Choose where to save the private REALRAW1C AHD gzip export.");
+            chooseExportDestination();
         }
     }
 
@@ -128,6 +172,22 @@ public final class MainActivity extends Activity {
             result = describeDocument(uri) + "\n\n" + M11RealRawProbe.run(this, uri);
         } catch (Throwable t) {
             result = "Real Xiaomi RAW probe FAILED\n" +
+                    t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()) + "\n\n" +
+                    "The native gate refuses non-matching inputs. M11 renderer was not invoked.";
+        }
+        final String text = result;
+        runOnUiThread(() -> status.setText(text));
+    }
+
+    private void runRealRawAhdExport(Uri sourceUri, Uri outputUri) {
+        String result;
+        try {
+            result = describeDocument(sourceUri) + "\n\n" +
+                    M11RealRawAhdExport.run(this, sourceUri, outputUri) + "\n\n" +
+                    "Upload the saved .gz file privately for exact ARM/x86 AHD comparison.\n" +
+                    "This export contains derived AHD pixels only; the M11 renderer was not invoked.";
+        } catch (Throwable t) {
+            result = "REALRAW1C AHD export FAILED\n" +
                     t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()) + "\n\n" +
                     "The native gate refuses non-matching inputs. M11 renderer was not invoked.";
         }
@@ -201,7 +261,7 @@ public final class MainActivity extends Activity {
                     .append("RAW unpack: DISABLED in this identify path.\n")
                     .append("AHD demosaic: DISABLED in this identify path.\n")
                     .append("M11 renderer hookup to native RAW pixels: DISABLED.\n")
-                    .append("The separate explicit real-Xiaomi probe does not alter this identify-only boundary.");
+                    .append("The separate explicit real-Xiaomi probe/export does not alter this identify-only boundary.");
             result = s.toString();
         } catch (Exception e) {
             result = "DNG inspection failed\n" + e.getClass().getSimpleName() + ": " + e.getMessage();
