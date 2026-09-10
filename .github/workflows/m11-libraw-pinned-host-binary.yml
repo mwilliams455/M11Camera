@@ -1,0 +1,86 @@
+name: M11 pinned LibRaw host parity binary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - work/apk1a-realraw1b
+    paths:
+      - '.github/workflows/m11-libraw-pinned-host-binary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-host-parity-binary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Fetch exact LibRaw sources
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git work/LibRaw
+          git -C work/LibRaw checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git work/LibRaw-cmake
+          git -C work/LibRaw-cmake checkout --detach "$LIBRAW_CMAKE_COMMIT"
+          test "$(git -C work/LibRaw rev-parse HEAD)" = "$LIBRAW_COMMIT"
+          test "$(git -C work/LibRaw-cmake rev-parse HEAD)" = "$LIBRAW_CMAKE_COMMIT"
+
+      - name: Configure and build exact host dumper
+        run: |
+          set -euo pipefail
+          mkdir -p work/pixel_probe
+          cat > work/pixel_probe/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.22)
+          project(m11_raw_pixel_parity LANGUAGES C CXX)
+
+          set(LIBRAW_PATH "${CMAKE_CURRENT_LIST_DIR}/../LibRaw" CACHE STRING "" FORCE)
+          set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_OPENMP OFF CACHE BOOL "" FORCE)
+          set(ENABLE_LCMS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_JASPER OFF CACHE BOOL "" FORCE)
+          set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+          set(ENABLE_RAWSPEED OFF CACHE BOOL "" FORCE)
+          set(ENABLE_DCRAW_DEBUG OFF CACHE BOOL "" FORCE)
+          set(ENABLE_X3FTOOLS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_6BY9RPI OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_INSTALL OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
+
+          add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../LibRaw-cmake" "${CMAKE_BINARY_DIR}/libraw")
+          add_executable(m11rawpixeldump "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe/m11_raw_pixel_parity_dump.cpp")
+          target_compile_features(m11rawpixeldump PRIVATE cxx_std_17)
+          target_include_directories(m11rawpixeldump PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe")
+          target_link_libraries(m11rawpixeldump PRIVATE libraw::libraw)
+          CMAKE
+
+          cmake -S work/pixel_probe -B work/pixel_build -DCMAKE_BUILD_TYPE=Release
+          cmake --build work/pixel_build --target m11rawpixeldump --parallel 2
+          exe=$(find work/pixel_build -name m11rawpixeldump -type f -perm -111 -print -quit)
+          test -n "$exe"
+          mkdir -p host_binary
+          cp "$exe" host_binary/m11rawpixeldump
+          chmod 755 host_binary/m11rawpixeldump
+          sha256sum host_binary/m11rawpixeldump | tee host_binary/SHA256.txt
+          ldd host_binary/m11rawpixeldump | tee host_binary/LDD.txt
+          {
+            echo "libraw_commit=$LIBRAW_COMMIT"
+            echo "libraw_cmake_commit=$LIBRAW_CMAKE_COMMIT"
+            echo "runner=ubuntu-24.04"
+            c++ --version | head -1
+          } | tee host_binary/PROVENANCE.txt
+
+      - name: Upload host parity binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-pinned-LibRaw-host-parity-binary
+          path: host_binary/
+          if-no-files-found: error
+          retention-days: 14
