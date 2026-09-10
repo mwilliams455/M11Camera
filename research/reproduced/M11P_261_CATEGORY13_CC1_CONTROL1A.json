@@ -1,0 +1,61 @@
+{
+  "schema": "m11camera.reproduced.category13.cc1_control1a.v1",
+  "evidence_class": "PRIMARY_REPRODUCED",
+  "source_firmware": "LEICA_M11-P_2.6.1.FW",
+  "source_firmware_sha256": "0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83",
+  "unpacked_firmware_sha256": "28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c",
+  "category": 13,
+  "category13_source_json_sha256": "7301628d67ef66e6f10e76825ddf451e28644e8dd1ce324bd35447af5b01aecb",
+  "record_size_bytes": 32,
+  "milbeaut_structural_mapping": {
+    "struct": "R2yCtrlCc1",
+    "fields": ["posiDec", "ccMatrix[3][3]", "clipPR", "clipMR", "clipPG", "clipMG", "clipPB", "clipMB"],
+    "posiDec_semantics": "CC1 matrix decimal point position",
+    "matrix_identity_crosscheck": "Milbeaut sample uses posiDec=0 with diagonal 512, confirming Q9 denominator 512 for Leica posiDec=0.",
+    "clip_semantics": "Separate 12-bit positive/negative post-CC1 clip levels for R/G/B."
+  },
+  "leica_decode": {
+    "posiDec": 0,
+    "matrix_denominator": 512,
+    "clip_positive_code": {"R": 4095, "G": 4095, "B": 4095},
+    "clip_negative_code": {"R": 0, "G": 0, "B": 0},
+    "clip_bits": 12,
+    "normalized_candidate_range": [0.0, 1.0],
+    "placement": "immediately after CC1 matrix and before YC conversion"
+  },
+  "bands": [
+    {
+      "iso_range_inclusive": [0, 9999],
+      "map_sha256": "22823d447b5ebf42572ee82730bb5a99c3e83d5736dcabe7c236e2fa7a2ce6b6",
+      "raw_i16": [0, 1041, -372, -157, -117, 630, -1, -4, -78, 595, 4095, 0, 4095, 0, 4095, 0],
+      "matrix_q9": [[1041, -372, -157], [-117, 630, -1], [-4, -78, 595]],
+      "tail_i16": [4095, 0, 4095, 0, 4095, 0]
+    },
+    {
+      "iso_range_inclusive": [10000, 19999],
+      "map_sha256": "b2d1e22e72c473eef30272a65bf02661009dcdc0cf1dc14f26015ff41f302b17",
+      "raw_i16": [0, 910, -290, -108, -74, 561, 25, 22, -41, 531, 4095, 0, 4095, 0, 4095, 0],
+      "matrix_q9": [[910, -290, -108], [-74, 561, 25], [22, -41, 531]],
+      "tail_i16": [4095, 0, 4095, 0, 4095, 0]
+    },
+    {
+      "iso_range_inclusive": [20000, 39999],
+      "map_sha256": "fc7cc561862a253e79cc300411f813f709591a41735c626c6a213afeb97ca9ae",
+      "raw_i16": [0, 806, -225, -69, -39, 506, 45, 44, -12, 480, 4095, 0, 4095, 0, 4095, 0],
+      "matrix_q9": [[806, -225, -69], [-39, 506, 45], [44, -12, 480]],
+      "tail_i16": [4095, 0, 4095, 0, 4095, 0]
+    },
+    {
+      "iso_range_inclusive": [40000, 200000],
+      "map_sha256": "08f7bf0c739fc1d116d26766a07b39fdcac835a9f532ad5e4258af44c9e8e8d3",
+      "raw_i16": [0, 715, -169, -34, -9, 458, 63, 61, 15, 436, 4095, 0, 4095, 0, 4095, 0],
+      "matrix_q9": [[715, -169, -34], [-9, 458, 63], [61, 15, 436]],
+      "tail_i16": [4095, 0, 4095, 0, 4095, 0]
+    }
+  ],
+  "notes": [
+    "The six tail words are identical in all four ISO bands: [4095,0,4095,0,4095,0].",
+    "This evidence supports a post-CC1 [0,4095] clamp in the 12-bit hardware domain, normalized to [0,1] in the floating-point renderer.",
+    "This file does not claim exact fixed-point multiply/rounding behavior, gamma placement, or Category42/CsCo pixel arithmetic."
+  ]
+}
