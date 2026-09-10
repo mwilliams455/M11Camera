@@ -2,9 +2,6 @@ name: M11 RENDER1G CAT42C1A ORIENT1A APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - work/render1g-cat42c1a-orient1a
 
 jobs:
   build-render1g-cat42c1a-orient1a:
