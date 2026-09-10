@@ -32,8 +32,10 @@ def pack_values(tiff_type: int, values) -> bytes:
 
 
 def build_dng() -> bytes:
-    width = 16
-    height = 16
+    # LibRaw's identify/open path rejects RAW dimensions below 22 pixels. Keep
+    # this fixture safely above that structural floor while still microscopic.
+    width = 32
+    height = 32
     raw = bytearray()
     for y in range(height):
         for x in range(width):
