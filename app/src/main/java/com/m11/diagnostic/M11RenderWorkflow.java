@@ -142,7 +142,7 @@ public final class M11RenderWorkflow {
                 "Baseline renderer preserved: no HDR, no local tone mapping, no extra WB/OETF, third SRO inactive, no highlight workaround.";
     }
 
-    private static JSONArray jsonArray(double[] values) {
+    private static JSONArray jsonArray(double[] values) throws Exception {
         JSONArray out = new JSONArray();
         for (double value : values) out.put(value);
         return out;
