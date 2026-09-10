@@ -245,8 +245,12 @@ def bridge_members(root: Path, targets: list[Path]) -> None:
         by_norm.setdefault(norm(name), set()).add(name)
 
     legacy: set[str] = set()
+    # Historical source uses both *_A(...) array helpers and direct
+    # SET_REG_{SIGNED,UNSIGNED}(...) helpers. Capture the member-name argument
+    # from both forms so imr2yctrl3.c CSP-adjacent functions can be bridged
+    # mechanically from the same generated headers as the gamma targets.
     set_reg_arg = re.compile(
-        r"imR2yUtils_SET_REG_(?:SIGNED|UNSIGNED)_A\s*\("
+        r"imR2yUtils_SET_REG_(?:SIGNED|UNSIGNED)(?:_A)?\s*\("
         r"[^,]+,[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)"
     )
     for path in targets:
