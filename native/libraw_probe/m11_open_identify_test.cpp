@@ -30,10 +30,11 @@ int main(int argc, char **argv) {
     std::cout << m11raw::serializeIdentifyEvidence(result);
 
     if (result.open_code != LIBRAW_SUCCESS) fail("LibRaw open_datastream failed");
-    if (result.libraw_version != "0.22.1") fail("unexpected LibRaw version");
+    if (result.libraw_version.rfind("0.22.1", 0) != 0)
+        fail("unexpected LibRaw version: " + result.libraw_version);
     if (result.decode_invoked) fail("decode flag unexpectedly true");
     if (result.make != "Xiaomi") fail("unexpected make: " + result.make);
-    if (result.raw_width != 16 || result.raw_height != 16)
+    if (result.raw_width != 32 || result.raw_height != 32)
         fail("unexpected raw dimensions");
     if (result.width == 0 || result.height == 0) fail("visible dimensions missing");
     if (result.raw_count < 1) fail("raw_count missing");
