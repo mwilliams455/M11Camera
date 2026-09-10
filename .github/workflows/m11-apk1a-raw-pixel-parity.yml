@@ -1,0 +1,145 @@
+name: M11 APK1A RAW Pixel Parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - m11-apk1a
+    paths:
+      - 'native/libraw_probe/m11_fd_datastream.h'
+      - 'native/libraw_probe/m11_raw_oracle_params.h'
+      - 'native/libraw_probe/m11_raw_pixel_parity_dump.cpp'
+      - 'tools/dump_m11_rawpy_pixel_parity.py'
+      - 'tools/generate_m11_synthetic_dng.py'
+      - 'tools/validate_m11_raw_oracle_environment.py'
+      - 'requirements/m11_raw_oracle.txt'
+      - '.github/workflows/m11-apk1a-raw-pixel-parity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  host-exact-pixel-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install frozen rawpy oracle
+        run: python -m pip install --disable-pip-version-check -r requirements/m11_raw_oracle.txt
+
+      - name: Verify rawpy and LibRaw oracle identity
+        run: python tools/validate_m11_raw_oracle_environment.py | tee rawpy_identity.json
+
+      - name: Fetch exact LibRaw sources
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git work/LibRaw
+          git -C work/LibRaw checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git work/LibRaw-cmake
+          git -C work/LibRaw-cmake checkout --detach "$LIBRAW_CMAKE_COMMIT"
+          test "$(git -C work/LibRaw rev-parse HEAD)" = "$LIBRAW_COMMIT"
+          test "$(git -C work/LibRaw-cmake rev-parse HEAD)" = "$LIBRAW_CMAKE_COMMIT"
+          grep -q '#define LIBRAW_MAJOR_VERSION 0' work/LibRaw/libraw/libraw_version.h
+          grep -q '#define LIBRAW_MINOR_VERSION 22' work/LibRaw/libraw/libraw_version.h
+          grep -q '#define LIBRAW_PATCH_VERSION 1' work/LibRaw/libraw/libraw_version.h
+
+      - name: Generate deterministic non-photographic DNG
+        run: |
+          set -euo pipefail
+          python tools/generate_m11_synthetic_dng.py --out work/apk1a_synthetic.dng | tee synthetic_dng.txt
+          test -s work/apk1a_synthetic.dng
+          grep -q 'synthetic_only=true' synthetic_dng.txt
+
+      - name: Configure direct LibRaw parity dumper
+        run: |
+          set -euo pipefail
+          mkdir -p work/pixel_probe
+          cat > work/pixel_probe/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.22)
+          project(m11_raw_pixel_parity LANGUAGES C CXX)
+
+          set(LIBRAW_PATH "${CMAKE_CURRENT_LIST_DIR}/../LibRaw" CACHE STRING "" FORCE)
+          set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_OPENMP OFF CACHE BOOL "" FORCE)
+          set(ENABLE_LCMS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_JASPER OFF CACHE BOOL "" FORCE)
+          set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+          set(ENABLE_RAWSPEED OFF CACHE BOOL "" FORCE)
+          set(ENABLE_DCRAW_DEBUG OFF CACHE BOOL "" FORCE)
+          set(ENABLE_X3FTOOLS OFF CACHE BOOL "" FORCE)
+          set(ENABLE_6BY9RPI OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_INSTALL OFF CACHE BOOL "" FORCE)
+          set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
+
+          add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../LibRaw-cmake" "${CMAKE_BINARY_DIR}/libraw")
+          add_executable(m11rawpixeldump "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe/m11_raw_pixel_parity_dump.cpp")
+          target_compile_features(m11rawpixeldump PRIVATE cxx_std_17)
+          target_include_directories(m11rawpixeldump PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe")
+          target_link_libraries(m11rawpixeldump PRIVATE libraw::libraw)
+          CMAKE
+
+          cmake -S work/pixel_probe -B work/pixel_build -DCMAKE_BUILD_TYPE=Release | tee pixel_configure.log
+          cmake --build work/pixel_build --target m11rawpixeldump --parallel 2 | tee pixel_build.log
+
+      - name: Dump pixels through direct LibRaw and rawpy
+        run: |
+          set -euo pipefail
+          exe=$(find work/pixel_build -name m11rawpixeldump -type f -perm -111 -print -quit)
+          test -n "$exe"
+          "$exe" work/apk1a_synthetic.dng work/direct | tee direct_dump.txt
+          python tools/dump_m11_rawpy_pixel_parity.py work/apk1a_synthetic.dng work/rawpy | tee rawpy_dump.txt
+          test -s work/direct/mosaic_u16le.bin
+          test -s work/rawpy/mosaic_u16le.bin
+          test -s work/direct/ahd_u16le.bin
+          test -s work/rawpy/ahd_u16le.bin
+
+      - name: Require byte-exact unpacked mosaic and AHD parity
+        run: |
+          set -euo pipefail
+          cmp work/direct/mosaic_u16le.bin work/rawpy/mosaic_u16le.bin
+          cmp work/direct/ahd_u16le.bin work/rawpy/ahd_u16le.bin
+          {
+            echo 'synthetic_fixture_only=true'
+            echo 'same_platform=x86_64-linux'
+            echo 'mosaic_byte_exact=true'
+            echo 'ahd_byte_exact=true'
+            echo 'android_pixel_parity_proven=false'
+            echo 'real_xiaomi_pixel_parity_proven=false'
+            sha256sum work/direct/mosaic_u16le.bin work/rawpy/mosaic_u16le.bin
+            sha256sum work/direct/ahd_u16le.bin work/rawpy/ahd_u16le.bin
+            echo '--- direct metadata ---'
+            cat work/direct/metadata.txt
+            echo '--- rawpy metadata ---'
+            cat work/rawpy/metadata.txt
+          } | tee pixel_parity_evidence.txt
+          grep -q 'mosaic_byte_exact=true' pixel_parity_evidence.txt
+          grep -q 'ahd_byte_exact=true' pixel_parity_evidence.txt
+          grep -q 'real_xiaomi_pixel_parity_proven=false' pixel_parity_evidence.txt
+
+      - name: Upload derived parity evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-APK1A-rawpy-libraw-synthetic-pixel-parity
+          path: |
+            rawpy_identity.json
+            synthetic_dng.txt
+            direct_dump.txt
+            rawpy_dump.txt
+            pixel_parity_evidence.txt
+            pixel_configure.log
+            pixel_build.log
+            work/direct/metadata.txt
+            work/rawpy/metadata.txt
+          if-no-files-found: error
+          retention-days: 14
