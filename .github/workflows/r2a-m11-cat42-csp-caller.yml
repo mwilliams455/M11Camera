@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
 
+# Rerun provenance trace after Category-42 generator/selector evidence tightened.
 jobs:
   trace:
     runs-on: ubuntu-latest
