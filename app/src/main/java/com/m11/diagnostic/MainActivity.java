@@ -17,7 +17,7 @@ import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Locale;
 
-/** APK1A research shell: inspect a DNG and validate the source-calibration boundary. */
+/** APK1A research shell: inspect a DNG and validate controlled renderer boundaries. */
 public final class MainActivity extends Activity {
     private static final int REQUEST_OPEN_DNG = 1101;
     private TextView status;
@@ -41,22 +41,44 @@ public final class MainActivity extends Activity {
                 M11MatrixCore.thirdTargetSummary() + "\n\n" +
                 "Third-matrix consumer placement: UNRESOLVED / not hard-wired.\n" +
                 "CC1 selection: exact firmware ISO bands only; no nearest-band guessing.\n" +
-                "Native RAW boundary: pinned LibRaw 0.22.1 open/identify only; pixel unpack and AHD remain disabled.");
+                "User-selected DNG RAW boundary: pinned LibRaw 0.22.1 open/identify ONLY.\n" +
+                "Bundled synthetic self-test: may run unpack + AHD only after exact fixture gates; never runs the M11 renderer.");
         body.addView(scope);
 
+        Button selfTest = new Button(this);
+        selfTest.setText("Run bundled ARM RAW parity self-test");
+        selfTest.setOnClickListener(v -> runSyntheticRawSelfTest());
+        body.addView(selfTest);
+
         Button open = new Button(this);
-        open.setText("Select Xiaomi DNG");
+        open.setText("Select Xiaomi DNG — identify only");
         open.setOnClickListener(v -> chooseDng());
         body.addView(open);
 
         status = new TextView(this);
-        status.setText("No DNG selected. Java metadata/source-transform/ISO validation and native LibRaw open/identify are ready.");
+        status.setText("Ready. Run the bundled synthetic ARM parity self-test, or select a Xiaomi DNG for metadata/open-identify only.");
         status.setTextIsSelectable(true);
         body.addView(status);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(body);
         setContentView(scroll);
+    }
+
+    private void runSyntheticRawSelfTest() {
+        status.setText("Running bundled 32x32 synthetic RAW through pinned LibRaw unpack + AHD on this device…");
+        new Thread(() -> {
+            String result;
+            try {
+                result = M11SyntheticRawSelfTest.run(this);
+            } catch (Throwable t) {
+                result = "Bundled RAW parity self-test FAILED\n" +
+                        t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()) + "\n\n" +
+                        "No real/user DNG was decoded. User-selected DNG path remains identify-only.";
+            }
+            final String text = result;
+            runOnUiThread(() -> status.setText(text));
+        }, "m11-synthetic-raw-selftest").start();
     }
 
     private void chooseDng() {
@@ -81,7 +103,7 @@ public final class MainActivity extends Activity {
         } catch (SecurityException ignored) {
             // Some providers grant temporary access only; sufficient for this session.
         }
-        status.setText("Reading Java DNG metadata and native LibRaw identification…");
+        status.setText("Reading Java DNG metadata and native LibRaw identification only…");
         new Thread(() -> inspectDng(uri), "m11-dng-inspect").start();
     }
 
@@ -146,12 +168,12 @@ public final class MainActivity extends Activity {
                     }
                 }
             }
-            s.append("\n\nBoundary status\n")
-                    .append("LibRaw open/identify: enabled for diagnostics only.\n")
-                    .append("RAW unpack: DISABLED.\n")
-                    .append("AHD demosaic: DISABLED.\n")
+            s.append("\n\nUser-DNG boundary status\n")
+                    .append("LibRaw open/identify: ENABLED for diagnostics only.\n")
+                    .append("RAW unpack: DISABLED for selected DNG.\n")
+                    .append("AHD demosaic: DISABLED for selected DNG.\n")
                     .append("M11 renderer hookup to native RAW pixels: DISABLED.\n")
-                    .append("Next proof required: same-byte Xiaomi DNG native-vs-rawpy pixel parity.");
+                    .append("The separate bundled synthetic self-test does not alter this boundary.");
             result = s.toString();
         } catch (Exception e) {
             result = "DNG inspection failed\n" + e.getClass().getSimpleName() + ": " + e.getMessage();
