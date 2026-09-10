@@ -14,14 +14,14 @@ public final class M11RealRawAhdExport {
     private M11RealRawAhdExport() {}
 
     public static String run(Context context, Uri sourceUri, Uri outputUri) throws Exception {
-        HashResult source = hashSource(context, sourceUri);
+        HashResult sourceHash = hashSource(context, sourceUri);
         String nativeResult;
-        try (ParcelFileDescriptor source = context.getContentResolver().openFileDescriptor(sourceUri, "r");
-             ParcelFileDescriptor output = context.getContentResolver().openFileDescriptor(outputUri, "w")) {
-            if (source == null) throw new IllegalStateException("content provider returned null source fd");
-            if (output == null) throw new IllegalStateException("content provider returned null output fd");
+        try (ParcelFileDescriptor sourcePfd = context.getContentResolver().openFileDescriptor(sourceUri, "r");
+             ParcelFileDescriptor outputPfd = context.getContentResolver().openFileDescriptor(outputUri, "w")) {
+            if (sourcePfd == null) throw new IllegalStateException("content provider returned null source fd");
+            if (outputPfd == null) throw new IllegalStateException("content provider returned null output fd");
             nativeResult = M11RealRawProbeBridge.exportRealXiaomiAhdFd(
-                    source.getFd(), output.getFd());
+                    sourcePfd.getFd(), outputPfd.getFd());
         }
 
         String abi = Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown";
@@ -33,7 +33,7 @@ public final class M11RealRawAhdExport {
                 "sourceSha256=%s\n" +
                 "outputUri=%s\n" +
                 "sameByteRawpyOracleCompared=false\n\n%s",
-                abi, source.bytes, source.sha256, outputUri, nativeResult);
+                abi, sourceHash.bytes, sourceHash.sha256, outputUri, nativeResult);
     }
 
     private static HashResult hashSource(Context context, Uri uri) throws Exception {
