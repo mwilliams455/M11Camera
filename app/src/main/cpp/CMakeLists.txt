@@ -23,7 +23,13 @@ set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${M11_LIBRAW_CMAKE_PATH}" "${CMAKE_BINARY_DIR}/libraw")
 
-add_library(m11rawjni SHARED m11_raw_jni.cpp)
+# m11_raw_jni.cpp is the user-selected DNG path and remains open/identify-only.
+# m11_raw_selftest_jni.cpp may unpack/AHD only after its independent hard gate
+# proves the input is the generated 32x32 synthetic fixture.
+add_library(m11rawjni SHARED
+    m11_raw_jni.cpp
+    m11_raw_selftest_jni.cpp
+)
 target_compile_features(m11rawjni PRIVATE cxx_std_17)
 target_compile_options(m11rawjni PRIVATE -fvisibility=hidden)
 target_include_directories(m11rawjni PRIVATE
