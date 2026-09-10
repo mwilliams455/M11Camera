@@ -1,0 +1,41 @@
+name: M11 rawpy CPython 3.13 wheelhouse
+
+on:
+  push:
+    branches:
+      - work/rawpy-cp313-wheelhouse
+  workflow_dispatch:
+
+jobs:
+  wheelhouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download frozen rawpy wheelhouse
+        run: |
+          set -euo pipefail
+          python -m pip download --only-binary=:all: -r requirements/m11_raw_oracle.txt -d wheelhouse
+          python - <<'PY'
+          from pathlib import Path
+          files = sorted(p.name for p in Path('wheelhouse').iterdir())
+          print('\n'.join(files))
+          assert any(p.startswith('rawpy-0.27.1-') and 'cp313' in p for p in files), files
+          PY
+          sha256sum wheelhouse/* | tee M11_RAWPY_CP313_WHEELHOUSE_SHA256.txt
+
+      - name: Upload wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-rawpy-0.27.1-cp313-wheelhouse
+          path: |
+            wheelhouse/*
+            M11_RAWPY_CP313_WHEELHOUSE_SHA256.txt
+          if-no-files-found: error
