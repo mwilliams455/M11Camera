@@ -130,8 +130,9 @@ inline void validateTables(const Tables& t) {
   }
 }
 
-inline StageTrace renderPixelTrace(const Vec3& rgb, const Tables& tables, const RenderConfig& cfg) {
-  validateTables(tables);
+// Full-frame callers validate the immutable tables once, then use this path for
+// every pixel.  The arithmetic is intentionally identical to renderPixelTrace().
+inline StageTrace renderPixelTraceValidated(const Vec3& rgb, const Tables& tables, const RenderConfig& cfg) {
   requireFinite(rgb);
   StageTrace tr{};
   tr.input = rgb;
@@ -177,8 +178,18 @@ inline StageTrace renderPixelTrace(const Vec3& rgb, const Tables& tables, const 
   return tr;
 }
 
+inline StageTrace renderPixelTrace(const Vec3& rgb, const Tables& tables, const RenderConfig& cfg) {
+  validateTables(tables);
+  return renderPixelTraceValidated(rgb, tables, cfg);
+}
+
+inline Vec3 renderPixelValidated(const Vec3& rgb, const Tables& tables, const RenderConfig& cfg) {
+  return renderPixelTraceValidated(rgb, tables, cfg).output;
+}
+
 inline Vec3 renderPixel(const Vec3& rgb, const Tables& tables, const RenderConfig& cfg) {
-  return renderPixelTrace(rgb, tables, cfg).output;
+  validateTables(tables);
+  return renderPixelValidated(rgb, tables, cfg);
 }
 
 }  // namespace m11::render
