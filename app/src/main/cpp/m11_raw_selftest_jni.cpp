@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -117,7 +118,7 @@ std::vector<std::uint8_t> runSyntheticFixture(JNIEnv *env, int source_fd) {
     std::vector<std::uint8_t> packet;
     packet.reserve(40u + mosaic_bytes + ahd_bytes);
     const std::uint8_t magic[8] = {'M','1','1','R','S','T','1',0};
-    packet.insert(packet.end(), std::begin(magic), std::end(magic));
+    packet.insert(packet.end(), magic, magic + 8);
     appendU32LE(packet, mosaic_bytes);
     appendU32LE(packet, ahd_bytes);
     appendU32LE(packet, kWidth);
