@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m unittest tests.test_materialize_m11_reference_tables -v
-          python -m py_compile tools/package_m11_apk_assets.py tools/materialize_m11_embedded_asset.py tools/apply_render1b_stageiso1a.py
+          python -m py_compile tools/package_m11_apk_assets.py tools/materialize_m11_embedded_asset.py tools/apply_render1b_stageiso1a.py tools/apply_render1b_device_labels.py
           python tools/materialize_m11_embedded_asset.py
           test "$(wc -c < app/src/main/assets/m11_reference_tables_v1.bin)" -eq 23150
           test "$(sha256sum app/src/main/assets/m11_reference_tables_v1.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
@@ -60,10 +60,11 @@ jobs:
           cp work/rawpy_selftest/mosaic_u16le.bin app/src/main/assets/apk1a_expected_mosaic_u16le.bin
           cp work/rawpy_selftest/ahd_u16le.bin app/src/main/assets/apk1a_expected_ahd_u16le.bin
 
-      - name: Apply diagnostic-only RENDER1B STAGEISO1A overlay
+      - name: Apply diagnostic-only RENDER1B STAGEISO1A overlays
         run: |
           set -euo pipefail
           python tools/apply_render1b_stageiso1a.py | tee M11_RENDER1B_PATCH.txt
+          python tools/apply_render1b_device_labels.py | tee M11_RENDER1B_DEVICE_LABELS.txt
           grep -q 'schema=m11camera.render1b.stageiso1a.v1' app/src/main/cpp/m11_render_jni.cpp
           grep -q 'stageIsolationOnly=true' app/src/main/cpp/m11_render_jni.cpp
           grep -q 'baselineRendererMathChanged=false' app/src/main/cpp/m11_render_jni.cpp
@@ -71,11 +72,17 @@ jobs:
           grep -q 'candidate.noGammaPreClamp' app/src/main/cpp/m11_render_jni.cpp
           grep -q 'candidate.noChromaPreClamp' app/src/main/cpp/m11_render_jni.cpp
           grep -q 'category42ArithmeticImplemented=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'm11camera.render1b.stageiso1a.device.v1' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q '_M11_RENDER1B_STAGEISO1A' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
           git diff -- app/src/main/cpp/m11_render_jni.cpp > M11_RENDER1B_NATIVE.patch
+          git diff -- app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java > M11_RENDER1B_JAVA.patch
 
       - name: Audit RENDER1B fail-closed boundaries
         run: |
           set -euo pipefail
+          grep -q 'applicationId = "com.m11.diagnostic.render1b"' app/build.gradle.kts
+          grep -q 'versionName = "0.1.5-render1b-stageiso1a"' app/build.gradle.kts
+          grep -q 'android:label="M11 RENDER1B StageIso"' app/src/main/AndroidManifest.xml
           grep -q 'ASSET_SHA256 = "54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219"' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
           grep -q 'thirdSroApplied", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
           grep -q 'rendererMathChangedForHighlightIssue", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
@@ -143,7 +150,9 @@ jobs:
           name: M11-RENDER1B-STAGEISO1A-buildlog
           path: |
             M11_RENDER1B_PATCH.txt
+            M11_RENDER1B_DEVICE_LABELS.txt
             M11_RENDER1B_NATIVE.patch
+            M11_RENDER1B_JAVA.patch
             M11_RENDER1B_GRADLE.log
             M11_RENDER1B_APK_CONTENTS.log
             M11_RENDER1B_APK_SHA256.txt
