@@ -51,9 +51,9 @@ s = replace_once(
 )
 
 # ORIENT1A: LibRaw dcraw_process() has already honoured the DNG orientation.
-# The previous Java rotation therefore applied Orientation=6 twice.  Keep the
+# The previous Java rotation therefore applied Orientation=6 twice. Keep the
 # native bitmap exactly as returned, but fail closed on expected dimensions so
-# this cannot silently mask an orientation-regression in LibRaw.
+# this cannot silently mask an orientation regression in LibRaw.
 s = replace_once(
     s,
     '''        Bitmap rawBitmap = nativeResult.bitmap;
@@ -62,12 +62,14 @@ s = replace_once(
 ''',
     '''        Bitmap rawBitmap = nativeResult.bitmap;
         boolean orientationSwapsAxes = orientation >= 5 && orientation <= 8;
-        int expectedNativeWidth = orientationSwapsAxes ? meta.imageHeight : meta.imageWidth;
-        int expectedNativeHeight = orientationSwapsAxes ? meta.imageWidth : meta.imageHeight;
-        if (rawBitmap.getWidth() != expectedNativeWidth || rawBitmap.getHeight() != expectedNativeHeight) {
+        long expectedNativeWidth = orientationSwapsAxes ? meta.imageHeight : meta.imageWidth;
+        long expectedNativeHeight = orientationSwapsAxes ? meta.imageWidth : meta.imageHeight;
+        int actualNativeWidth = rawBitmap.getWidth();
+        int actualNativeHeight = rawBitmap.getHeight();
+        if (actualNativeWidth != expectedNativeWidth || actualNativeHeight != expectedNativeHeight) {
             rawBitmap.recycle();
             throw new IOException("ORIENT1A: LibRaw-oriented bitmap dimensions mismatch: got " +
-                    nativeResult.bitmap.getWidth() + "x" + nativeResult.bitmap.getHeight() +
+                    actualNativeWidth + "x" + actualNativeHeight +
                     " expected " + expectedNativeWidth + "x" + expectedNativeHeight +
                     " for TIFF orientation " + orientation);
         }
@@ -106,6 +108,10 @@ for marker in [
     "orientationHandledByLibRaw",
     "javaOrientationApplied",
     "orientationDimensionGate",
+    "long expectedNativeWidth",
+    "long expectedNativeHeight",
+    "actualNativeWidth",
+    "actualNativeHeight",
     "M11 RENDER1G CAT42C1A ORIENT1A complete",
 ]:
     if marker not in s:
@@ -119,3 +125,4 @@ print("outerSchema=m11camera.render1g.cat42c1a.orient1a.device.v1")
 print("candidate=CAT42C1A_ORIENT1A")
 print("orientationHandledByLibRaw=true")
 print("javaOrientationApplied=false")
+print("orientationDimensionsUseLong=true")
