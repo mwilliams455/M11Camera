@@ -20,6 +20,8 @@ import struct
 from collections import Counter
 from pathlib import Path
 
+import numpy as np
+
 from extract_m11p_forensics import EXPECTED_UNPACKED_SHA, s32
 
 
@@ -80,9 +82,37 @@ def conservative_cs_shape(v) -> bool:
     b=v['border']
     if any(not (0<=x<=1023) for x in b) or not (b[0]<=b[1]<=b[2]): return False
     if v['yrv'] not in (0,1) or v['crv'] not in (0,1) or v['cfix'] not in (0,1): return False
-    # Remaining fixed/offset fields are intentionally not range-filtered here;
-    # their exact signed widths are not needed for the KY/TBL locator scan.
     return True
+
+
+def structural_candidate_offsets(data: bytes) -> list[int]:
+    """Vectorized halfword scan; excludes completely zero control windows."""
+    usable=len(data)&~1
+    a=np.frombuffer(memoryview(data)[:usable],dtype='<i2')
+    stop=a.size-21
+    out=[]
+    chunk=2_000_000
+    for s in range(0,stop,chunk):
+        e=min(stop,s+chunk)
+        en=a[s:e]; ky=a[s+1:e+1]; tbl=a[s+2:e+2]
+        mask=((en==0)|(en==1)) & (ky>=0) & (ky<=8) & ((tbl==0)|(tbl==1))
+        for k in range(3,7):
+            x=a[s+k:e+k]; mask &= (x>=0)&(x<=1023)
+        for k in range(7,11):
+            x=a[s+k:e+k]; mask &= (x>=-1024)&(x<=1023)
+        b0=a[s+11:e+11]; b1=a[s+12:e+12]; b2=a[s+13:e+13]
+        mask &= (b0>=0)&(b0<=1023)&(b1>=b0)&(b1<=1023)&(b2>=b1)&(b2<=1023)
+        for k in range(14,17):
+            x=a[s+k:e+k]; mask &= ((x==0)|(x==1))
+        # Zero-filled firmware naturally satisfies all width constraints. It is
+        # not a useful CSP locator, so require at least one non-zero field in
+        # the control portion through CFIX. Real mono survives: EN=1/KY=8.
+        nonzero=np.zeros(e-s,dtype=bool)
+        for k in range(17): nonzero |= a[s+k:e+k] != 0
+        mask &= nonzero
+        hits=np.flatnonzero(mask)
+        if hits.size: out.extend(((hits+s)*2).astype(np.int64).tolist())
+    return out
 
 
 def main():
@@ -105,20 +135,16 @@ def main():
             cs=decode_cs(raw) if d['map_size']==44 else None
             cat42.append({'db_index':di,**d,'cs':cs})
 
-    # Halfword-aligned scan. Real R2yCtrlCs records are 16-bit fields; limiting
-    # to 2-byte alignment avoids missing packed tables while retaining recall.
     structural=[]
-    for off in range(0,len(data)-43,2):
-        raw=data[off:off+44]; cs=decode_cs(raw)
+    for off in structural_candidate_offsets(data):
+        cs=decode_cs(data[off:off+44])
         if cs is None or not conservative_cs_shape(cs): continue
         owner=next((i for i,(lo,hi) in enumerate(owned_ranges) if lo<=off and off+44<=hi),None)
         structural.append({'offset':off,'db_index':owner,'cs':cs})
 
-    # Exact known Cat42 map starts are the strongest anchors.
     exact_offsets={x['map_offset_abs'] for x in cat42}
     for x in structural: x['is_category42_map_start']=x['offset'] in exact_offsets
 
-    # Candidate families: contiguous 44-byte runs of conservative records.
     byoff={x['offset']:x for x in structural}; families=[]; seen=set()
     for x in structural:
         o=x['offset']
@@ -128,6 +154,7 @@ def main():
             run.append(byoff[p]); seen.add(p); p+=44
         if len(run)>=2: families.append(run)
 
+    interesting=[x for x in structural if x['cs']['ky']!=8 or x['cs']['tbl']!=0]
     rep={
         'sha256':dig,
         'r2ys_signature_offsets':[hex(x) for x in sigs],
@@ -139,9 +166,7 @@ def main():
         'structural_candidate_count':len(structural),
         'structural_ky_histogram':dict(sorted(Counter(x['cs']['ky'] for x in structural).items())),
         'structural_tbl_histogram':dict(sorted(Counter(x['cs']['tbl'] for x in structural).items())),
-        'structural_candidates_non8_or_tbl1':[
-            x for x in structural if x['cs']['ky']!=8 or x['cs']['tbl']!=0
-        ][:500],
+        'structural_candidates_non8_or_tbl1':interesting[:500],
         'contiguous_structural_families':[
             [{'offset':x['offset'],'db_index':x['db_index'],'ky':x['cs']['ky'],'tbl':x['cs']['tbl'],'en':x['cs']['en'],'offsets':x['cs']['offset'],'gains':x['cs']['gain'],'borders':x['cs']['border'],'is_category42_map_start':x['is_category42_map_start']} for x in run]
             for run in families[:200]
@@ -149,8 +174,7 @@ def main():
         'evidence_boundary':{
             'category42_records_in_valid_r2ys':'primary_firmware_structure',
             'whole_image_structural_candidates':'locator_only',
-            'ky_endpoint_direction':'open',
-            'tbl_semantics':'open',
+            'ky_endpoint_direction':'open','tbl_semantics':'open',
         },
     }
 
@@ -159,16 +183,12 @@ def main():
     lines += ['', '## Category-42 controls', '', '| DB | state/deps | map | EN | KY | TBL | offsets | gains | borders |','|---:|---|---:|---:|---:|---:|---|---|---|']
     for x in cat42:
         c=x['cs']; lines.append(f"| {x['db_index']} | `{x['dependencies_s32']}` | `0x{x['map_offset_abs']:08x}` | {c['en'] if c else '?'} | {c['ky'] if c else '?'} | {c['tbl'] if c else '?'} | `{c['offset'] if c else []}` | `{c['gain'] if c else []}` | `{c['border'] if c else []}` |")
-    lines += ['', '## Category-42 invariants across every valid R2YS DB', '', f"- KY values: `{rep['category42_ky_values']}`", f"- TBL values: `{rep['category42_tbl_values']}`", f"- EN values: `{rep['category42_en_values']}`", '', '## Whole-image conservative CSP-shape scan (locator only)', '', f"- halfword-aligned structural candidates: `{len(structural)}`", f"- KY histogram: `{rep['structural_ky_histogram']}`", f"- TBL histogram: `{rep['structural_tbl_histogram']}`", f"- contiguous 44-byte candidate families (2+ records): `{len(families)}`", '']
-    interesting=[x for x in structural if x['cs']['ky']!=8 or x['cs']['tbl']!=0]
-    lines += [f'- candidates with KY != 8 or TBL = 1: `{len(interesting)}`', '']
+    lines += ['', '## Category-42 invariants across every valid R2YS DB', '', f"- KY values: `{rep['category42_ky_values']}`", f"- TBL values: `{rep['category42_tbl_values']}`", f"- EN values: `{rep['category42_en_values']}`", '', '## Whole-image conservative CSP-shape scan (locator only)', '', f"- halfword-aligned non-zero structural candidates: `{len(structural)}`", f"- KY histogram: `{rep['structural_ky_histogram']}`", f"- TBL histogram: `{rep['structural_tbl_histogram']}`", f"- contiguous 44-byte candidate families (2+ records): `{len(families)}`", f"- candidates with KY != 8 or TBL = 1: `{len(interesting)}`", '']
     lines += ['### First 80 interesting structural candidates','', '| offset | DB | EN | KY | TBL | offsets | gains | borders |','|---:|---:|---:|---:|---:|---|---|---|']
     for x in interesting[:80]:
         c=x['cs']; lines.append(f"| `0x{x['offset']:08x}` | {x['db_index']} | {c['en']} | {c['ky']} | {c['tbl']} | `{c['offset']}` | `{c['gain']}` | `{c['border']}` |")
     lines += ['', '## Interpretation boundary','', 'Category-42 records decoded from valid R2YS descriptors are primary firmware parameter evidence. The whole-image 44-byte shape scan is only a locator: unrelated data can satisfy the field-width constraints. A KY/TBL variant becomes meaningful only if it is owned by a valid parameter database, belongs to a coherent contiguous control family, or can be tied to the proven CSP consumer by code/data references.','']
-
     a.json.parent.mkdir(parents=True,exist_ok=True); a.markdown.parent.mkdir(parents=True,exist_ok=True)
-    a.json.write_text(json.dumps(rep,indent=2)+'\n'); a.markdown.write_text('\n'.join(lines)+'\n')
-    print(a.markdown)
+    a.json.write_text(json.dumps(rep,indent=2)+'\n'); a.markdown.write_text('\n'.join(lines)+'\n'); print(a.markdown)
 
 if __name__=='__main__': main()
