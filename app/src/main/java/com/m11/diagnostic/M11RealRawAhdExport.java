@@ -1,0 +1,65 @@
+package com.m11.diagnostic;
+
+import android.content.Context;
+import android.net.Uri;
+import android.os.Build;
+import android.os.ParcelFileDescriptor;
+
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.util.Locale;
+
+/** One-time private REALRAW1C export of gated on-device AHD bytes for exact parity analysis. */
+public final class M11RealRawAhdExport {
+    private M11RealRawAhdExport() {}
+
+    public static String run(Context context, Uri sourceUri, Uri outputUri) throws Exception {
+        HashResult source = hashSource(context, sourceUri);
+        String nativeResult;
+        try (ParcelFileDescriptor source = context.getContentResolver().openFileDescriptor(sourceUri, "r");
+             ParcelFileDescriptor output = context.getContentResolver().openFileDescriptor(outputUri, "w")) {
+            if (source == null) throw new IllegalStateException("content provider returned null source fd");
+            if (output == null) throw new IllegalStateException("content provider returned null output fd");
+            nativeResult = M11RealRawProbeBridge.exportRealXiaomiAhdFd(
+                    source.getFd(), output.getFd());
+        }
+
+        String abi = Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown";
+        return String.format(Locale.US,
+                "M11 APK1A REALRAW1C exact AHD export\n" +
+                "explicitDerivedPixelExport=true\n" +
+                "deviceAbi=%s\n" +
+                "sourceBytes=%d\n" +
+                "sourceSha256=%s\n" +
+                "outputUri=%s\n" +
+                "sameByteRawpyOracleCompared=false\n\n%s",
+                abi, source.bytes, source.sha256, outputUri, nativeResult);
+    }
+
+    private static HashResult hashSource(Context context, Uri uri) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        long bytes = 0;
+        try (InputStream in = context.getContentResolver().openInputStream(uri)) {
+            if (in == null) throw new IllegalStateException("content provider returned null input stream");
+            byte[] buffer = new byte[64 * 1024];
+            for (int n; (n = in.read(buffer)) >= 0;) {
+                if (n == 0) continue;
+                digest.update(buffer, 0, n);
+                bytes += n;
+            }
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte b : digest.digest()) hex.append(String.format(Locale.US, "%02x", b & 0xff));
+        return new HashResult(bytes, hex.toString());
+    }
+
+    private static final class HashResult {
+        final long bytes;
+        final String sha256;
+
+        HashResult(long bytes, String sha256) {
+            this.bytes = bytes;
+            this.sha256 = sha256;
+        }
+    }
+}
