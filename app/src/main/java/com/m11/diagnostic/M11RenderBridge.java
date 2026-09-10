@@ -16,6 +16,10 @@ import android.graphics.Bitmap;
  * an Android RGBA_8888 Bitmap, and never applies the unresolved third SRO.
  */
 public final class M11RenderBridge {
+    static {
+        System.loadLibrary("m11rawjni");
+    }
+
     private M11RenderBridge() {}
 
     public static final class Result {
