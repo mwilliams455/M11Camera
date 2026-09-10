@@ -13,11 +13,11 @@ android {
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = "com.m11.diagnostic.render1b"
+        applicationId = "com.m11.diagnostic.render1c"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.5-render1b-stageiso1a"
+        versionCode = 7
+        versionName = "0.1.6-render1c-cc1clip1a"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
 
