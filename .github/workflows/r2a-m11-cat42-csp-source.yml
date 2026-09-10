@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
 
+# Re-run after selector strings tied Cat42 directly to ISO/Saturation selection.
 jobs:
   trace:
     runs-on: ubuntu-latest
