@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  build-host-parity-binary:
+  build-host-parity-binaries:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -33,14 +33,13 @@ jobs:
           test "$(git -C work/LibRaw rev-parse HEAD)" = "$LIBRAW_COMMIT"
           test "$(git -C work/LibRaw-cmake rev-parse HEAD)" = "$LIBRAW_CMAKE_COMMIT"
 
-      - name: Configure and build exact host dumper
+      - name: Write parity dumper CMake project
         run: |
           set -euo pipefail
           mkdir -p work/pixel_probe
           cat > work/pixel_probe/CMakeLists.txt <<'CMAKE'
           cmake_minimum_required(VERSION 3.22)
           project(m11_raw_pixel_parity LANGUAGES C CXX)
-
           set(LIBRAW_PATH "${CMAKE_CURRENT_LIST_DIR}/../LibRaw" CACHE STRING "" FORCE)
           set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
           set(ENABLE_OPENMP OFF CACHE BOOL "" FORCE)
@@ -53,7 +52,6 @@ jobs:
           set(ENABLE_6BY9RPI OFF CACHE BOOL "" FORCE)
           set(LIBRAW_INSTALL OFF CACHE BOOL "" FORCE)
           set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
-
           add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../LibRaw-cmake" "${CMAKE_BINARY_DIR}/libraw")
           add_executable(m11rawpixeldump "${CMAKE_CURRENT_LIST_DIR}/../../native/libraw_probe/m11_raw_pixel_parity_dump.cpp")
           target_compile_features(m11rawpixeldump PRIVATE cxx_std_17)
@@ -61,26 +59,46 @@ jobs:
           target_link_libraries(m11rawpixeldump PRIVATE libraw::libraw)
           CMAKE
 
-          cmake -S work/pixel_probe -B work/pixel_build -DCMAKE_BUILD_TYPE=Release
-          cmake --build work/pixel_build --target m11rawpixeldump --parallel 2
-          exe=$(find work/pixel_build -name m11rawpixeldump -type f -perm -111 -print -quit)
+      - name: Build GCC host dumper
+        run: |
+          set -euo pipefail
+          cmake -S work/pixel_probe -B work/pixel_build_gcc -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+          cmake --build work/pixel_build_gcc --target m11rawpixeldump --parallel 2
+          exe=$(find work/pixel_build_gcc -name m11rawpixeldump -type f -perm -111 -print -quit)
           test -n "$exe"
-          mkdir -p host_binary
-          cp "$exe" host_binary/m11rawpixeldump
-          chmod 755 host_binary/m11rawpixeldump
-          sha256sum host_binary/m11rawpixeldump | tee host_binary/SHA256.txt
-          ldd host_binary/m11rawpixeldump | tee host_binary/LDD.txt
+          mkdir -p host_binaries
+          cp "$exe" host_binaries/m11rawpixeldump-gcc
+          chmod 755 host_binaries/m11rawpixeldump-gcc
+
+      - name: Build Clang host dumper
+        run: |
+          set -euo pipefail
+          clang --version | head -1
+          cmake -S work/pixel_probe -B work/pixel_build_clang -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake --build work/pixel_build_clang --target m11rawpixeldump --parallel 2
+          exe=$(find work/pixel_build_clang -name m11rawpixeldump -type f -perm -111 -print -quit)
+          test -n "$exe"
+          cp "$exe" host_binaries/m11rawpixeldump-clang
+          chmod 755 host_binaries/m11rawpixeldump-clang
+
+      - name: Record provenance
+        run: |
+          set -euo pipefail
+          sha256sum host_binaries/m11rawpixeldump-* | tee host_binaries/SHA256.txt
           {
             echo "libraw_commit=$LIBRAW_COMMIT"
             echo "libraw_cmake_commit=$LIBRAW_CMAKE_COMMIT"
             echo "runner=ubuntu-24.04"
-            c++ --version | head -1
-          } | tee host_binary/PROVENANCE.txt
+            gcc --version | head -1
+            clang --version | head -1
+          } | tee host_binaries/PROVENANCE.txt
+          ldd host_binaries/m11rawpixeldump-gcc > host_binaries/LDD-GCC.txt
+          ldd host_binaries/m11rawpixeldump-clang > host_binaries/LDD-CLANG.txt
 
-      - name: Upload host parity binary
+      - name: Upload host parity binaries
         uses: actions/upload-artifact@v4
         with:
-          name: M11-pinned-LibRaw-host-parity-binary
-          path: host_binary/
+          name: M11-pinned-LibRaw-host-parity-binaries-gcc-clang
+          path: host_binaries/
           if-no-files-found: error
           retention-days: 14
