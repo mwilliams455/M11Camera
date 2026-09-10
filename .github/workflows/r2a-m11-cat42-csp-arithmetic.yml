@@ -108,10 +108,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          url='https://launchpad.net/gcc-arm-embedded/4.9/4.9-2015-q3-update/+download/gcc-arm-none-eabi-4_9-2015q3-20150921-linux.tar.bz2'
-          curl -L --fail --retry 2 --retry-all-errors -o /tmp/gcc-arm.tar.bz2 "$url"
+          archive=/tmp/gcc-arm.tar.bz2
+          rm -f "$archive"
+          for url in \
+            'https://firmware.ardupilot.org/Tools/STM32-tools/archived/gcc-arm-none-eabi-4_9-2015q3-20150921-linux.tar.bz2' \
+            'https://launchpad.net/gcc-arm-embedded/4.9/4.9-2015-q3-update/+download/gcc-arm-none-eabi-4_9-2015q3-20150921-linux.tar.bz2'; do
+            echo "Trying exact GCC archive: $url"
+            rm -f "$archive"
+            if curl -L --fail --connect-timeout 10 --max-time 90 --retry 1 --retry-all-errors -o "$archive" "$url"; then
+              break
+            fi
+          done
+          test -s "$archive"
+          rm -rf /tmp/gcc-arm
           mkdir -p /tmp/gcc-arm
-          tar -xjf /tmp/gcc-arm.tar.bz2 -C /tmp/gcc-arm --strip-components=1
+          tar -xjf "$archive" -C /tmp/gcc-arm --strip-components=1
           /tmp/gcc-arm/bin/arm-none-eabi-gcc --version | tee /tmp/cat42/gcc-version.txt
           grep -q '4.9.3 20150529' /tmp/cat42/gcc-version.txt
 
