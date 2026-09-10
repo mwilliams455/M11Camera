@@ -9,7 +9,13 @@ on:
 jobs:
   build-apk1a:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+      NDK_VERSION: 27.2.12479018
+      M11_LIBRAW_PATH: ${{ github.workspace }}/work/LibRaw
+      M11_LIBRAW_CMAKE_PATH: ${{ github.workspace }}/work/LibRaw-cmake
     steps:
       - name: Checkout M11 repo
         uses: actions/checkout@v4
@@ -26,7 +32,10 @@ jobs:
         run: |
           set -euo pipefail
           python -m unittest tests.test_materialize_m11_reference_tables -v
-          python -m py_compile tools/package_m11_apk_assets.py tools/generate_m11_android_python_parity_fixture.py
+          python -m py_compile \
+            tools/package_m11_apk_assets.py \
+            tools/generate_m11_android_python_parity_fixture.py \
+            tools/generate_m11_synthetic_dng.py
           PYTHONPATH=. python tools/generate_m11_android_python_parity_fixture.py \
             --out app/src/test/resources/m11_python_android_parity_v1.b64
           test -s app/src/test/resources/m11_python_android_parity_v1.b64
@@ -40,27 +49,71 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android platform and build tools
+      - name: Install Android platform, build tools, NDK and CMake
         run: |
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;3.22.1"
+          test -f "$ANDROID_HOME/ndk/${NDK_VERSION}/build/cmake/android.toolchain.cmake"
+
+      - name: Fetch exact LibRaw sources for JNI build
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git "$M11_LIBRAW_PATH"
+          git -C "$M11_LIBRAW_PATH" checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git "$M11_LIBRAW_CMAKE_PATH"
+          git -C "$M11_LIBRAW_CMAKE_PATH" checkout --detach "$LIBRAW_CMAKE_COMMIT"
+          test "$(git -C "$M11_LIBRAW_PATH" rev-parse HEAD)" = "$LIBRAW_COMMIT"
+          test "$(git -C "$M11_LIBRAW_CMAKE_PATH" rev-parse HEAD)" = "$LIBRAW_CMAKE_COMMIT"
+          grep -q '#define LIBRAW_MAJOR_VERSION 0' "$M11_LIBRAW_PATH/libraw/libraw_version.h"
+          grep -q '#define LIBRAW_MINOR_VERSION 22' "$M11_LIBRAW_PATH/libraw/libraw_version.h"
+          grep -q '#define LIBRAW_PATCH_VERSION 1' "$M11_LIBRAW_PATH/libraw/libraw_version.h"
+
+      - name: Audit APK JNI remains identify-only
+        run: |
+          set -euo pipefail
+          ! grep -nE '\.(unpack|dcraw_process|dcraw_make_mem_image|raw2image)\s*\(' \
+            native/libraw_probe/m11_open_identify_core.h \
+            app/src/main/cpp/m11_raw_jni.cpp
+          grep -q 'open_datastream' native/libraw_probe/m11_open_identify_core.h
 
       - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
 
-      - name: Run APK1A unit tests and build debug APK
+      - name: Run APK1A unit tests and build debug APK with native identify bridge
         run: |
           set -o pipefail
           gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace 2>&1 | tee M11_APK1A_GRADLE.log
+
+      - name: Audit APK contains only expected arm64 native bridge
+        if: success()
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)
+          test -n "$apk"
+          unzip -l "$apk" | tee M11_APK1A_APK_CONTENTS.log
+          grep -q 'lib/arm64-v8a/libm11rawjni.so' M11_APK1A_APK_CONTENTS.log
+          ! grep -q 'lib/x86/' M11_APK1A_APK_CONTENTS.log
+          ! grep -q 'lib/x86_64/' M11_APK1A_APK_CONTENTS.log
+          ! grep -q 'lib/armeabi-v7a/' M11_APK1A_APK_CONTENTS.log
+          sha256sum "$apk" | tee M11_APK1A_SHA256.txt
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: M11-APK1A-buildlog
-          path: M11_APK1A_GRADLE.log
+          path: |
+            M11_APK1A_GRADLE.log
+            M11_APK1A_APK_CONTENTS.log
+            M11_APK1A_SHA256.txt
           if-no-files-found: ignore
 
       - name: Upload APK1A debug APK
