@@ -23,23 +23,28 @@ set(LIBRAW_UNINSTALL_TARGET OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${M11_LIBRAW_CMAKE_PATH}" "${CMAKE_BINARY_DIR}/libraw")
 find_library(M11_Z_LIB z REQUIRED)
+find_library(M11_JNIGRAPHICS_LIB jnigraphics REQUIRED)
 
-# m11_raw_jni.cpp is the original user-selected DNG path and remains
-# open/identify-only. m11_raw_selftest_jni.cpp may unpack/AHD only after its
-# exact synthetic-fixture gate. m11_realraw_probe_jni.cpp is a separate,
-# explicitly selected hash/statistics path and may unpack/AHD only after its
-# narrow real-Xiaomi metadata/decoder gate. m11_realraw_export_jni.cpp is the
-# REALRAW1C one-time gzip export path with the same narrow gate. None invokes
-# the M11 renderer.
+# The original identify, synthetic parity, REALRAW probe and REALRAW1C export
+# paths retain their existing boundaries.  RENDER1A is a new explicitly gated
+# translation unit: it may unpack/AHD only after the same narrow real-Xiaomi
+# decoder identity gate and may invoke the frozen M11 renderer only with tables
+# already accepted by the Java canonical-asset loader.
 add_library(m11rawjni SHARED
     m11_raw_jni.cpp
     m11_raw_selftest_jni.cpp
     m11_realraw_probe_jni.cpp
     m11_realraw_export_jni.cpp
+    m11_render_jni.cpp
 )
 target_compile_features(m11rawjni PRIVATE cxx_std_17)
 target_compile_options(m11rawjni PRIVATE -fvisibility=hidden)
 target_include_directories(m11rawjni PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../../../../native/libraw_probe"
+    "${CMAKE_CURRENT_LIST_DIR}/../../../../native/m11_renderer"
 )
-target_link_libraries(m11rawjni PRIVATE libraw::libraw ${M11_Z_LIB})
+target_link_libraries(m11rawjni PRIVATE
+    libraw::libraw
+    ${M11_Z_LIB}
+    ${M11_JNIGRAPHICS_LIB}
+)
