@@ -16,8 +16,8 @@ android {
         applicationId = "com.m11.diagnostic"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3-apk1a-realraw1c"
+        versionCode = 5
+        versionName = "0.1.4-render1a-canonical1a"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
 

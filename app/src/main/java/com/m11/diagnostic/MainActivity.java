@@ -23,6 +23,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_REAL_RAW_PROBE = 1102;
     private static final int REQUEST_REAL_RAW_EXPORT_SOURCE = 1103;
     private static final int REQUEST_REAL_RAW_EXPORT_DEST = 1104;
+    private static final int REQUEST_RENDER_M11_STANDARD = 1105;
 
     private TextView status;
     private Uri pendingExportSource;
@@ -37,20 +38,19 @@ public final class MainActivity extends Activity {
         body.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("Leica M11 Diagnostic — APK1A");
+        title.setText("Leica M11 Diagnostic — RENDER1A");
         title.setTextSize(22f);
         body.addView(title);
 
         TextView scope = new TextView(this);
-        scope.setText("Offline DNG research renderer foundation. Capture integration is intentionally deferred until controlled-render parity is stable.\n\n" +
+        scope.setText("Offline DNG research renderer foundation. Capture integration remains deferred until controlled rendering is photographically validated.\n\n" +
                 M11MatrixCore.thirdTargetSummary() + "\n\n" +
-                "Third-matrix consumer placement: UNRESOLVED / not hard-wired.\n" +
+                "Third-matrix consumer placement: UNRESOLVED / inactive.\n" +
                 "CC1 selection: exact firmware ISO bands only; no nearest-band guessing.\n" +
-                "Original user-selected DNG path: pinned LibRaw 0.22.1 open/identify ONLY.\n" +
-                "Bundled synthetic self-test: unpack + AHD only after exact fixture gates.\n" +
-                "Separate real-Xiaomi probe: unpack + AHD only after narrow Xiaomi metadata/decoder gates.\n" +
-                "REALRAW1C export: same gated AHD bytes may be gzip-exported only to a user-selected document for private parity analysis.\n" +
-                "No RAW parity or export path invokes the M11 renderer.");
+                "Original identify/probe/export paths remain available and isolated.\n" +
+                "RENDER1A Standard: canonical M11-P 2.6.1 table asset + frozen Xiaomi RAW/AHD path + explicit Xiaomi source calibration/reference-basis bridge.\n" +
+                "No HDR, no local tone mapping, no second source WB, no extra output OETF.\n" +
+                "The known highlight-range/Category42 consumer question is NOT corrected by eye in this baseline build.");
         body.addView(scope);
 
         Button selfTest = new Button(this);
@@ -73,8 +73,13 @@ public final class MainActivity extends Activity {
         realExport.setOnClickListener(v -> chooseDng(REQUEST_REAL_RAW_EXPORT_SOURCE));
         body.addView(realExport);
 
+        Button render = new Button(this);
+        render.setText("Select Xiaomi DNG — render M11 Standard");
+        render.setOnClickListener(v -> chooseDng(REQUEST_RENDER_M11_STANDARD));
+        body.addView(render);
+
         status = new TextView(this);
-        status.setText("Ready. Synthetic ARM parity, explicit real-Xiaomi RAW probe, and REALRAW1C derived AHD export are isolated. The M11 renderer remains disconnected.");
+        status.setText("Ready. RENDER1A Standard is available as a separate, provenance-gated action; REALRAW1C and diagnostic paths are preserved.");
         status.setTextIsSelectable(true);
         body.addView(status);
 
@@ -149,7 +154,8 @@ public final class MainActivity extends Activity {
 
         if (requestCode != REQUEST_IDENTIFY_DNG &&
                 requestCode != REQUEST_REAL_RAW_PROBE &&
-                requestCode != REQUEST_REAL_RAW_EXPORT_SOURCE) return;
+                requestCode != REQUEST_REAL_RAW_EXPORT_SOURCE &&
+                requestCode != REQUEST_RENDER_M11_STANDARD) return;
 
         persistPermission(data, uri);
 
@@ -159,11 +165,27 @@ public final class MainActivity extends Activity {
         } else if (requestCode == REQUEST_REAL_RAW_PROBE) {
             status.setText("Running explicitly selected real Xiaomi DNG through gated LibRaw unpack + AHD hash probe…");
             new Thread(() -> runRealRawProbe(uri), "m11-realraw-probe").start();
-        } else {
+        } else if (requestCode == REQUEST_REAL_RAW_EXPORT_SOURCE) {
             pendingExportSource = uri;
             status.setText("Source DNG selected. Choose where to save the private REALRAW1C AHD gzip export.");
             chooseExportDestination();
+        } else {
+            status.setText("Rendering M11 Standard from the exact canonical firmware asset. Baseline math is frozen; no highlight workaround is being applied…");
+            new Thread(() -> runM11StandardRender(uri), "m11-render1a-standard").start();
         }
+    }
+
+    private void runM11StandardRender(Uri uri) {
+        String result;
+        try {
+            result = describeDocument(uri) + "\n\n" + M11RenderWorkflow.run(this, uri);
+        } catch (Throwable t) {
+            result = "M11 RENDER1A Standard FAILED\n" +
+                    t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()) + "\n\n" +
+                    "The render path is fail-closed: exact firmware asset, ISO band, Xiaomi RAW identity and source metadata must all pass before output is saved.";
+        }
+        final String text = result;
+        runOnUiThread(() -> status.setText(text));
     }
 
     private void runRealRawProbe(Uri uri) {
@@ -201,13 +223,8 @@ public final class MainActivity extends Activity {
             StringBuilder s = new StringBuilder(describeDocument(uri));
             try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r")) {
                 if (pfd == null) throw new IllegalStateException("content provider returned null file descriptor");
-
-                // Native identify owns an internal dup(fd) and uses pread-backed seek semantics,
-                // so this call neither consumes nor transfers ownership of the picker descriptor.
-                // It intentionally stops at LibRaw::open_datastream(): no unpack/AHD/render.
                 String nativeIdentify = M11NativeRawBridge.identifyFd(pfd.getFd());
-                s.append("\n\nNative LibRaw open/identify — independent metadata view\n")
-                        .append(nativeIdentify);
+                s.append("\n\nNative LibRaw open/identify — independent metadata view\n").append(nativeIdentify);
 
                 try (FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
                      FileChannel channel = in.getChannel()) {
@@ -218,6 +235,7 @@ public final class MainActivity extends Activity {
                             .append("model=").append(meta.model).append('\n')
                             .append("uniqueCameraModel=").append(meta.uniqueCameraModel).append('\n')
                             .append("imageSize=").append(meta.imageWidth).append('x').append(meta.imageHeight).append('\n')
+                            .append("orientation=").append(M11DngOrientation.read(channel)).append('\n')
                             .append("blackLevel=").append(Arrays.toString(meta.blackLevel)).append('\n')
                             .append("whiteLevel=").append(Arrays.toString(meta.whiteLevel)).append('\n')
                             .append("CFARepeatPatternDim=").append(Arrays.toString(meta.cfaRepeatPatternDim)).append('\n')
@@ -225,10 +243,8 @@ public final class MainActivity extends Activity {
                             .append("CalibrationIlluminant1=").append(meta.calibrationIlluminant1).append('\n')
                             .append("CalibrationIlluminant2=").append(meta.calibrationIlluminant2).append('\n')
                             .append("AsShotNeutral=").append(Arrays.toString(meta.asShotNeutral)).append('\n')
-                            .append("CameraCalibration1DefaultedIdentity=")
-                            .append(meta.cameraCalibration1DefaultedIdentity).append('\n')
-                            .append("CameraCalibration2DefaultedIdentity=")
-                            .append(meta.cameraCalibration2DefaultedIdentity).append('\n')
+                            .append("CameraCalibration1DefaultedIdentity=").append(meta.cameraCalibration1DefaultedIdentity).append('\n')
+                            .append("CameraCalibration2DefaultedIdentity=").append(meta.cameraCalibration2DefaultedIdentity).append('\n')
                             .append("sourceTransformReady=").append(meta.sourceTransformReady()).append('\n')
                             .append("iso=").append(iso.present() ? iso.iso : "unavailable").append('\n')
                             .append("isoSource=").append(iso.sourceName()).append('\n')
@@ -260,8 +276,8 @@ public final class MainActivity extends Activity {
                     .append("LibRaw open/identify: ENABLED for diagnostics only.\n")
                     .append("RAW unpack: DISABLED in this identify path.\n")
                     .append("AHD demosaic: DISABLED in this identify path.\n")
-                    .append("M11 renderer hookup to native RAW pixels: DISABLED.\n")
-                    .append("The separate explicit real-Xiaomi probe/export does not alter this identify-only boundary.");
+                    .append("M11 renderer hookup: available only through the separate explicit RENDER1A Standard action.\n")
+                    .append("REALRAW1C probe/export remains isolated from renderer invocation.");
             result = s.toString();
         } catch (Exception e) {
             result = "DNG inspection failed\n" + e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -276,7 +292,7 @@ public final class MainActivity extends Activity {
         if (value < 10000) return "band0 [0,10000)";
         if (value < 20000) return "band1 [10000,20000)";
         if (value < 40000) return "band2 [20000,40000)";
-        if (value < 200000) return "band3 [40000,200000)";
+        if (value <= 200000) return "band3 [40000,200001)";
         return "unresolved (outside extracted firmware intervals)";
     }
 

@@ -12,28 +12,14 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Loader for the compact, hash-gated M11 APK1A firmware-derived table asset.
- *
- * The production asset is created only by tools/package_m11_apk_assets.py after
- * that tool has verified the exact canonical M11-P 2.6.1 extraction hashes.
- * This loader verifies the serialization checksum and the declared primary
- * source hashes, selects the genuine Category-13 ISO band, and materializes the
- * existing M11ReferenceRendererCore.Tables contract without changing renderer
- * mathematics.
- *
- * The 33-word SRO block is retained as provenance/audit data.  Its third matrix
- * is deliberately not returned as an active pixel transform; the format itself
- * carries an explicit zero placement flag until the firmware consumer is known.
- */
+/** Strict loader for the canonical, firmware-derived RENDER1A table asset. */
 public final class M11ReferenceAssetLoader {
     private M11ReferenceAssetLoader() {}
 
-    private static final byte[] MAGIC = new byte[] {'M','1','1','A','P','K','1','A'};
+    private static final byte[] MAGIC = {'M','1','1','A','P','K','1','A'};
     private static final int FORMAT_VERSION = 1;
     public static final String EXPECTED_FIRMWARE_SHA256 =
             "0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83";
-
     private static final String[] SOURCE_NAMES = {
             "category3_CC0_candidate.json",
             "category13_CC1_candidate.json",
@@ -49,24 +35,23 @@ public final class M11ReferenceAssetLoader {
             "b142a9cfcf51e52849e5aac17c224b4de113c79a8ae809b47d8f9fd5fbef658b",
             "0738ae474494fc83299bd75ba7a4b298950fed49005b6c5693eb0f18c23cfbdc",
             "6d67e6b601683477e6322d0097d8b2afcc6e015416f93152ec25e8e8ff2fe5f8",
-            "5869a69073a698f506b86c068261d0640b90e93da20627d9d7a7926b043c46cb",
+            "59ffbdefdc608285d31b437e7d3c9187e77a894c0a79efa07e521f62c7ddcd54",
             "1bd82548e7d64e3151f59bf05458d4216faa5c0f314d8668442eb692e43b576a"
     };
-
+    private static final long[][] EXPECTED_ISO_HALF_OPEN = {
+            {0, 10000}, {10000, 20000}, {20000, 40000}, {40000, 200001}
+    };
     private static final int[] EXPECTED_YCC = {77,150,29,-43,-85,128,128,-107,-21};
     private static final int[] EXPECTED_TONE_LUMA = {77,149,29};
     private static final int[] EXPECTED_THIRD_SRO = {212,-165,-71,-73,676,85,-27,174,285};
     private static final int[][] EXPECTED_MODE_RECORDS = {
-            {0, -1, -1, 511, 100},
-            {1,  0,  0, 588, 115},
-            {2,  1,  1, 665, 130}
+            {0,-1,-1,511,100}, {1,0,0,588,115}, {2,1,1,665,130}
     };
 
     public static final class IsoBand {
         public final long lowerInclusive;
         public final long upperExclusive;
         public final int[] matrixQ9;
-
         IsoBand(long lowerInclusive, long upperExclusive, int[] matrixQ9) {
             this.lowerInclusive = lowerInclusive;
             this.upperExclusive = upperExclusive;
@@ -77,7 +62,8 @@ public final class M11ReferenceAssetLoader {
     public static final class Metadata {
         public final int formatVersion;
         public final String firmwareSha256;
-        public final Map<String, String> canonicalSourceSha256;
+        public final Map<String,String> canonicalSourceSha256;
+        /** SHA-256 of binary payload, equal to the exact 32-byte binary trailer. */
         public final String payloadSha256;
         public final int requestedIso;
         public final int selectedCc1BandIndex;
@@ -85,7 +71,7 @@ public final class M11ReferenceAssetLoader {
         public final int[] sroWords;
         public final boolean thirdSroActiveInPixelChain;
 
-        Metadata(int formatVersion, String firmwareSha256, Map<String, String> canonicalSourceSha256,
+        Metadata(int formatVersion, String firmwareSha256, Map<String,String> canonicalSourceSha256,
                  String payloadSha256, int requestedIso, int selectedCc1BandIndex,
                  IsoBand[] cc1Bands, int[] sroWords, boolean thirdSroActiveInPixelChain) {
             this.formatVersion = formatVersion;
@@ -103,7 +89,6 @@ public final class M11ReferenceAssetLoader {
     public static final class Asset {
         public final Metadata metadata;
         public final M11ReferenceRendererCore.Tables tables;
-
         Asset(Metadata metadata, M11ReferenceRendererCore.Tables tables) {
             this.metadata = metadata;
             this.tables = tables;
@@ -113,14 +98,13 @@ public final class M11ReferenceAssetLoader {
     public static Asset load(InputStream input, int iso) throws IOException {
         if (input == null) throw new IllegalArgumentException("input == null");
         if (iso < 0) throw new IllegalArgumentException("ISO must be non-negative");
-
         byte[] all = readAll(input);
         if (all.length < MAGIC.length + 4 + 32 + 32) throw new IOException("M11 asset is truncated");
         int payloadLength = all.length - 32;
         byte[] payload = Arrays.copyOf(all, payloadLength);
         byte[] trailer = Arrays.copyOfRange(all, payloadLength, all.length);
-        byte[] actualDigest = sha256(payload);
-        if (!MessageDigest.isEqual(trailer, actualDigest)) throw new IOException("M11 asset payload SHA-256 mismatch");
+        byte[] actualPayloadDigest = sha256(payload);
+        if (!MessageDigest.isEqual(trailer, actualPayloadDigest)) throw new IOException("M11 asset payload SHA-256 mismatch");
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
         byte[] magic = new byte[MAGIC.length];
@@ -128,16 +112,14 @@ public final class M11ReferenceAssetLoader {
         if (!Arrays.equals(magic, MAGIC)) throw new IOException("M11 asset magic mismatch");
         int version = in.readInt();
         if (version != FORMAT_VERSION) throw new IOException("unsupported M11 asset format version " + version);
-
         String firmwareHash = readHash(in);
         if (!EXPECTED_FIRMWARE_SHA256.equals(firmwareHash)) throw new IOException("unexpected M11 firmware source hash");
-        Map<String, String> sourceHashes = new LinkedHashMap<>();
+
+        Map<String,String> sourceHashes = new LinkedHashMap<>();
         for (int i = 0; i < SOURCE_NAMES.length; i++) {
             String digest = readHash(in);
             sourceHashes.put(SOURCE_NAMES[i], digest);
-            if (!EXPECTED_SOURCE_SHA256[i].equals(digest)) {
-                throw new IOException("unexpected canonical source hash for " + SOURCE_NAMES[i]);
-            }
+            if (!EXPECTED_SOURCE_SHA256[i].equals(digest)) throw new IOException("unexpected canonical source hash for " + SOURCE_NAMES[i]);
         }
 
         int ccQ = in.readUnsignedShort();
@@ -160,7 +142,9 @@ public final class M11ReferenceAssetLoader {
             long lower = Integer.toUnsignedLong(in.readInt());
             long upper = Integer.toUnsignedLong(in.readInt());
             int[] matrix = readI16(in, 9);
-            if (upper <= lower) throw new IOException("invalid CC1 ISO band interval at index " + i);
+            if (lower != EXPECTED_ISO_HALF_OPEN[i][0] || upper != EXPECTED_ISO_HALF_OPEN[i][1]) {
+                throw new IOException("CC1 ISO interval invariant mismatch at index " + i);
+            }
             bands[i] = new IsoBand(lower, upper, matrix);
             if (lower <= iso && iso < upper) selected = i;
         }
@@ -168,7 +152,7 @@ public final class M11ReferenceAssetLoader {
 
         int[] ycc = readI16(in, 9);
         if (!Arrays.equals(ycc, EXPECTED_YCC)) throw new IOException("Category24 YCC invariant mismatch");
-        int[] toneLuma = new int[] {in.readUnsignedShort(), in.readUnsignedShort(), in.readUnsignedShort()};
+        int[] toneLuma = {in.readUnsignedShort(), in.readUnsignedShort(), in.readUnsignedShort()};
         if (!Arrays.equals(toneLuma, EXPECTED_TONE_LUMA)) throw new IOException("tone luma invariant mismatch");
 
         double[] toneX = new double[toneSamples];
@@ -177,8 +161,8 @@ public final class M11ReferenceAssetLoader {
         for (int state = 0; state < 7; state++) {
             for (int i = 0; i < toneSamples; i++) {
                 int gain = in.readUnsignedShort();
-                toneCurves[state][i] = toneX[i] * gain / (double)toneQ;
                 if (state == 0 && gain != 4096) throw new IOException("tone -3 identity invariant mismatch at " + i);
+                toneCurves[state][i] = toneX[i] * gain / (double)toneQ;
             }
         }
 
@@ -199,10 +183,8 @@ public final class M11ReferenceAssetLoader {
             int satField = in.readUnsignedShort();
             int chromaPercent = in.readUnsignedShort();
             int[] expected = EXPECTED_MODE_RECORDS[i];
-            if (reserved != 0 || modeId != expected[0] || contrast != expected[1] ||
-                    saturationState != expected[2] || satField != expected[3] || chromaPercent != expected[4]) {
-                throw new IOException("creative-mode mapping mismatch at record " + i);
-            }
+            if (reserved != 0 || modeId != expected[0] || contrast != expected[1] || saturationState != expected[2] ||
+                    satField != expected[3] || chromaPercent != expected[4]) throw new IOException("creative-mode mapping mismatch at record " + i);
         }
 
         int[] sroWords = new int[33];
@@ -212,30 +194,26 @@ public final class M11ReferenceAssetLoader {
         }
         if (sroWords[31] != 0 || sroWords[32] != 6807) throw new IOException("third SRO metadata mismatch");
         int thirdSroActive = in.readUnsignedByte();
-        if (in.readUnsignedByte() != 0 || in.readUnsignedByte() != 0 || in.readUnsignedByte() != 0) {
-            throw new IOException("non-zero reserved bytes after SRO placement flag");
-        }
+        if (in.readUnsignedByte() != 0 || in.readUnsignedByte() != 0 || in.readUnsignedByte() != 0) throw new IOException("non-zero reserved bytes after SRO placement flag");
         if (thirdSroActive != 0) throw new IOException("third SRO consumer placement is unresolved and must remain inactive");
         if (in.available() != 0) throw new IOException("unexpected trailing bytes inside M11 asset payload");
 
-        double[] cc0 = q9ToDouble(cc0Q9);
-        double[] cc1 = q9ToDouble(bands[selected].matrixQ9);
         M11ReferenceRendererCore.Tables tables = new M11ReferenceRendererCore.Tables(
-                cc0, cc1, toneX, toneCurves, gammaX, gammaY);
-        Metadata metadata = new Metadata(version, firmwareHash, sourceHashes, toHex(actualDigest),
+                q9ToDouble(cc0Q9), q9ToDouble(bands[selected].matrixQ9), toneX, toneCurves, gammaX, gammaY);
+        Metadata metadata = new Metadata(version, firmwareHash, sourceHashes, toHex(actualPayloadDigest),
                 iso, selected, bands, sroWords, false);
         return new Asset(metadata, tables);
     }
 
-    private static int[] readI16(DataInputStream in, int count) throws IOException {
-        int[] out = new int[count];
-        for (int i = 0; i < count; i++) out[i] = in.readShort();
+    private static int[] readI16(DataInputStream in, int n) throws IOException {
+        int[] out = new int[n];
+        for (int i = 0; i < n; i++) out[i] = in.readShort();
         return out;
     }
 
-    private static double[] q9ToDouble(int[] q9) {
-        double[] out = new double[q9.length];
-        for (int i = 0; i < q9.length; i++) out[i] = q9[i] / 512.0;
+    private static double[] q9ToDouble(int[] values) {
+        double[] out = new double[values.length];
+        for (int i = 0; i < values.length; i++) out[i] = values[i] / 512.0;
         return out;
     }
 
@@ -247,11 +225,9 @@ public final class M11ReferenceAssetLoader {
 
     private static byte[] readAll(InputStream input) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
+        byte[] buffer = new byte[8192];
         int n;
-        while ((n = input.read(buf)) >= 0) {
-            if (n > 0) out.write(buf, 0, n);
-        }
+        while ((n = input.read(buffer)) >= 0) if (n > 0) out.write(buffer, 0, n);
         return out.toByteArray();
     }
 
@@ -264,8 +240,8 @@ public final class M11ReferenceAssetLoader {
     }
 
     private static String toHex(byte[] data) {
-        StringBuilder sb = new StringBuilder(data.length * 2);
-        for (byte b : data) sb.append(String.format("%02x", b & 0xff));
-        return sb.toString();
+        StringBuilder out = new StringBuilder(data.length * 2);
+        for (byte b : data) out.append(String.format("%02x", b & 0xff));
+        return out.toString();
     }
 }
