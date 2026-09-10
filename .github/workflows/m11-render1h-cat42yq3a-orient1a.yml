@@ -1,0 +1,208 @@
+name: M11 RENDER1H CAT42YQ3A ORIENT1A APK
+
+on:
+  push:
+    branches: [work/render1g-cat42c1a-orient1a]
+    paths:
+      - '.github/workflows/m11-render1h-cat42yq3a-orient1a.yml'
+      - 'tools/apply_render1h_cat42yq3a.py'
+      - 'tools/apply_render1h_device_labels.py'
+  workflow_dispatch:
+
+jobs:
+  build-render1h-cat42yq3a-orient1a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+      NDK_VERSION: 27.2.12479018
+      M11_LIBRAW_PATH: ${{ github.workspace }}/work/LibRaw
+      M11_LIBRAW_CMAKE_PATH: ${{ github.workspace }}/work/LibRaw-cmake
+      M11_REFERENCE_ASSET_SHA256: 54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219
+
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install frozen rawpy parity environment
+        run: python -m pip install --disable-pip-version-check -r requirements/m11_raw_oracle.txt
+
+      - name: Validate tooling and materialize exact canonical Android asset
+        run: |
+          set -euo pipefail
+          python -m unittest tests.test_materialize_m11_reference_tables -v
+          python -m py_compile \
+            tools/package_m11_apk_assets.py \
+            tools/materialize_m11_embedded_asset.py \
+            tools/apply_render1b_stageiso1a.py \
+            tools/apply_render1b_device_labels.py \
+            tools/apply_render1c_cc1clip1a.py \
+            tools/apply_render1c_device_labels.py \
+            tools/apply_render1d_gammaplace1a.py \
+            tools/apply_render1d_device_labels.py \
+            tools/apply_render1e_chromanorm1a.py \
+            tools/apply_render1e_device_labels.py \
+            tools/apply_render1f_cat42y1a.py \
+            tools/apply_render1f_device_labels.py \
+            tools/apply_render1g_device_labels.py \
+            tools/apply_render1h_cat42yq3a.py \
+            tools/apply_render1h_device_labels.py
+          python tools/materialize_m11_embedded_asset.py
+          test "$(wc -c < app/src/main/assets/m11_reference_tables_v1.bin)" -eq 23150
+          test "$(sha256sum app/src/main/assets/m11_reference_tables_v1.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+
+      - name: Generate parity and synthetic RAW diagnostic assets
+        run: |
+          set -euo pipefail
+          python tools/validate_m11_raw_oracle_environment.py | tee M11_RAWPY_IDENTITY.json
+          PYTHONPATH=. python tools/generate_m11_android_python_parity_fixture.py --out app/src/test/resources/m11_python_android_parity_v1.b64
+          mkdir -p app/src/main/assets work/rawpy_selftest
+          python tools/generate_m11_synthetic_dng.py --out app/src/main/assets/apk1a_synthetic.dng | tee M11_SYNTHETIC_DNG.txt
+          python tools/dump_m11_rawpy_pixel_parity.py app/src/main/assets/apk1a_synthetic.dng work/rawpy_selftest | tee M11_RAWPY_SELFTEST_DUMP.txt
+          cp work/rawpy_selftest/mosaic_u16le.bin app/src/main/assets/apk1a_expected_mosaic_u16le.bin
+          cp work/rawpy_selftest/ahd_u16le.bin app/src/main/assets/apk1a_expected_ahd_u16le.bin
+
+      - name: Apply RENDER1H CAT42YQ3A ORIENT1A overlays
+        run: |
+          set -euo pipefail
+          python tools/apply_render1h_cat42yq3a.py | tee M11_RENDER1H_PATCH.txt
+          python tools/apply_render1h_device_labels.py | tee M11_RENDER1H_DEVICE_LABELS.txt
+          grep -q 'schema=m11camera.render1h.cat42yq3a.orient1a.v1' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'savedBitmapUsesGammaPlaceCandidate=true' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'gammaPlacementRetained=true' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'cc1ClipRetained=true' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'provisionalStandardChromaScaleRemoved=true' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'candidateChromaScale=1.0' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42ArithmeticImplemented=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42HypothesisName=CAT42YQ3A' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42ReferenceHypothesis=postCC1_Y_KY8_endpoint_closed' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42CsykyEndpoint=8_is_Y_closed_for_M11' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42ReferenceQuantization=nearest_10bit_code_bounded' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42GainFractionBitsHypothesis=3' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42ScaleDenominatorHypothesis=512' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42SegmentAnchoring=local_segment_start' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42BorderConvention=right_open_bounded' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42SignedQ3Rounding=floor_div8_arithmetic_shift_equivalent' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42FixedPointRoundingImplemented=true' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42IntegerConventionHardwareExact=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'category42RegisterPlusOneScaleSemanticsApplied=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'const int cat42_reference_code' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'const int cat42_q3_delta' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'const auto& out = cat42_out;' app/src/main/cpp/m11_render_jni.cpp
+          ! grep -q 'postCC1_chroma_chebyshev_2x_10bit' app/src/main/cpp/m11_render_jni.cpp
+          ! grep -q '2x_max_abs_Cb_Cr' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'm11camera.render1h.cat42yq3a.orient1a.device.v1' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q '_M11_RENDER1H_CAT42YQ3A_ORIENT1A' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'orientationHandledByLibRaw' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'javaOrientationApplied' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'expectedNativeWidth' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          ! grep -q 'applyOrientation(rawBitmap, orientation)' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          ! grep -q 'CAT42C1A' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          git diff -- app/src/main/cpp/m11_render_jni.cpp > M11_RENDER1H_NATIVE.patch
+          git diff -- app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java app/build.gradle.kts app/src/main/AndroidManifest.xml > M11_RENDER1H_DEVICE.patch
+
+      - name: Audit RENDER1H fail-closed boundaries
+        run: |
+          set -euo pipefail
+          grep -q 'applicationId = "com.m11.diagnostic.render1h"' app/build.gradle.kts
+          grep -q 'versionCode = 12' app/build.gradle.kts
+          grep -q 'versionName = "0.1.11-render1h-cat42yq3a-orient1a"' app/build.gradle.kts
+          grep -q 'android:label="M11 RENDER1H Cat42YQ3"' app/src/main/AndroidManifest.xml
+          grep -q 'ASSET_SHA256 = "54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219"' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'gammaPlacementRetained", true' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'provisionalStandardChromaScaleRemoved", true' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'category42ArithmeticImplemented", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'category42HypothesisApplied", true' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'category42ReferenceHypothesis", "postCC1_Y_KY8_endpoint_closed"' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'category42CsykyEndpoint", "8_is_Y_closed_for_M11"' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'category42IntegerConventionHardwareExact", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'category42RegisterPlusOneScaleSemanticsApplied", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'orientationHandledByLibRaw", true' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'javaOrientationApplied", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'orientationDimensionGate", true' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'config.mode = m11::render::Mode::Standard' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'config.clamp = false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'applyRawpy0271OracleParams(raw.imgdata.params, false)' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'additionalDownstreamSourceWB=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'extraOutputOetf=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'thirdSroApplied=false' app/src/main/cpp/m11_render_jni.cpp
+          ! grep -RniE 'LocalLaplacian|local_tone_mapping|hdr_merge|HDRMerge' native/m11_renderer/m11_reference_renderer_core.h app/src/main/cpp/m11_render_jni.cpp
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform, build tools, NDK and CMake
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+
+      - name: Fetch exact LibRaw sources for JNI build
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git "$M11_LIBRAW_PATH"
+          git -C "$M11_LIBRAW_PATH" checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git "$M11_LIBRAW_CMAKE_PATH"
+          git -C "$M11_LIBRAW_CMAKE_PATH" checkout --detach "$LIBRAW_CMAKE_COMMIT"
+
+      - name: Set up Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Run unit tests and build RENDER1H candidate APK
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace 2>&1 | tee M11_RENDER1H_GRADLE.log
+
+      - name: Audit APK contents and canonical asset bytes
+        if: success()
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)
+          test -n "$apk"
+          unzip -l "$apk" | tee M11_RENDER1H_APK_CONTENTS.log
+          grep -q 'lib/arm64-v8a/libm11rawjni.so' M11_RENDER1H_APK_CONTENTS.log
+          grep -q 'assets/m11_reference_tables_v1.bin' M11_RENDER1H_APK_CONTENTS.log
+          unzip -p "$apk" assets/m11_reference_tables_v1.bin > M11_APK_REFERENCE_ASSET.bin
+          test "$(sha256sum M11_APK_REFERENCE_ASSET.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+          sha256sum "$apk" | tee M11_RENDER1H_APK_SHA256.txt
+
+      - name: Upload RENDER1H build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-RENDER1H-CAT42YQ3A-ORIENT1A-buildlog
+          path: |
+            M11_RENDER1H_PATCH.txt
+            M11_RENDER1H_DEVICE_LABELS.txt
+            M11_RENDER1H_NATIVE.patch
+            M11_RENDER1H_DEVICE.patch
+            M11_RENDER1H_GRADLE.log
+            M11_RENDER1H_APK_CONTENTS.log
+            M11_RENDER1H_APK_SHA256.txt
+            M11_RAWPY_IDENTITY.json
+            M11_SYNTHETIC_DNG.txt
+            M11_RAWPY_SELFTEST_DUMP.txt
+          if-no-files-found: ignore
+
+      - name: Upload RENDER1H candidate APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11Cam-RENDER1H-CAT42YQ3A-ORIENT1A
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
