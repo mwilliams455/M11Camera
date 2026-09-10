@@ -1,4 +1,4 @@
-name: M11 RENDER1A Native Renderer Parity
+name: M11 RENDER1A Native Pipeline Parity
 
 on:
   workflow_dispatch:
@@ -37,13 +37,17 @@ jobs:
             > work/m11_python_native_parity_v1.bin
           test -s work/m11_python_native_parity_v1.bin
 
-      - name: Compile native frozen renderer parity gate
+      - name: Compile native RENDER1A parity gates
         run: |
           set -euo pipefail
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
             -Inative/m11_renderer \
             tests/native/m11_reference_renderer_parity_test.cpp \
             -o work/m11_reference_renderer_parity_test
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            -Inative/m11_renderer \
+            tests/native/m11_source_pipeline_parity_test.cpp \
+            -o work/m11_source_pipeline_parity_test
 
       - name: Compare C++ renderer to Python stage oracle
         run: |
@@ -54,6 +58,15 @@ jobs:
           grep -q 'native_renderer_parity=true' M11_RENDER1A_NATIVE_PARITY.txt
           grep -q 'cases=147' M11_RENDER1A_NATIVE_PARITY.txt
           grep -q 'third_sro_applied=false' M11_RENDER1A_NATIVE_PARITY.txt
+
+      - name: Validate native source calibration and M11 basis bridge
+        run: |
+          set -euo pipefail
+          work/m11_source_pipeline_parity_test \
+            | tee M11_RENDER1A_SOURCE_PARITY.txt
+          grep -q 'native_source_pipeline_parity=true' M11_RENDER1A_SOURCE_PARITY.txt
+          grep -q 'reference_basis_status=strong_inference' M11_RENDER1A_SOURCE_PARITY.txt
+          grep -q 'third_sro_applied=false' M11_RENDER1A_SOURCE_PARITY.txt
 
       - name: Audit evidence boundary
         run: |
@@ -66,6 +79,8 @@ jobs:
             native/m11_renderer/m11_reference_renderer_core.h
           grep -q '77.0 / 255.0, 149.0 / 255.0, 29.0 / 255.0' \
             native/m11_renderer/m11_reference_renderer_core.h
+          grep -q '0.57568359375, -0.13330078125, -0.01611328125' \
+            native/m11_renderer/m11_source_pipeline_core.h
 
       - name: Upload RENDER1A parity evidence
         if: always()
@@ -74,5 +89,6 @@ jobs:
           name: M11-RENDER1A-native-parity
           path: |
             M11_RENDER1A_NATIVE_PARITY.txt
+            M11_RENDER1A_SOURCE_PARITY.txt
             work/m11_python_native_parity_v1.bin
           if-no-files-found: ignore
