@@ -19,7 +19,8 @@ import java.util.Locale;
 
 /** APK1A research shell: inspect a DNG and validate controlled renderer boundaries. */
 public final class MainActivity extends Activity {
-    private static final int REQUEST_OPEN_DNG = 1101;
+    private static final int REQUEST_IDENTIFY_DNG = 1101;
+    private static final int REQUEST_REAL_RAW_PROBE = 1102;
     private TextView status;
 
     @Override
@@ -41,8 +42,10 @@ public final class MainActivity extends Activity {
                 M11MatrixCore.thirdTargetSummary() + "\n\n" +
                 "Third-matrix consumer placement: UNRESOLVED / not hard-wired.\n" +
                 "CC1 selection: exact firmware ISO bands only; no nearest-band guessing.\n" +
-                "User-selected DNG RAW boundary: pinned LibRaw 0.22.1 open/identify ONLY.\n" +
-                "Bundled synthetic self-test: may run unpack + AHD only after exact fixture gates; never runs the M11 renderer.");
+                "Original user-selected DNG path: pinned LibRaw 0.22.1 open/identify ONLY.\n" +
+                "Bundled synthetic self-test: unpack + AHD only after exact fixture gates.\n" +
+                "Separate real-Xiaomi probe: unpack + AHD only after narrow Xiaomi metadata/decoder gates.\n" +
+                "No RAW parity probe invokes the M11 renderer.");
         body.addView(scope);
 
         Button selfTest = new Button(this);
@@ -50,13 +53,18 @@ public final class MainActivity extends Activity {
         selfTest.setOnClickListener(v -> runSyntheticRawSelfTest());
         body.addView(selfTest);
 
-        Button open = new Button(this);
-        open.setText("Select Xiaomi DNG — identify only");
-        open.setOnClickListener(v -> chooseDng());
-        body.addView(open);
+        Button identify = new Button(this);
+        identify.setText("Select Xiaomi DNG — identify only");
+        identify.setOnClickListener(v -> chooseDng(REQUEST_IDENTIFY_DNG));
+        body.addView(identify);
+
+        Button realProbe = new Button(this);
+        realProbe.setText("Select Xiaomi DNG — gated unpack + AHD hash test");
+        realProbe.setOnClickListener(v -> chooseDng(REQUEST_REAL_RAW_PROBE));
+        body.addView(realProbe);
 
         status = new TextView(this);
-        status.setText("Ready. Run the bundled synthetic ARM parity self-test, or select a Xiaomi DNG for metadata/open-identify only.");
+        status.setText("Ready. Synthetic ARM parity is isolated from the explicit real-Xiaomi RAW probe. The M11 renderer remains disconnected.");
         status.setTextIsSelectable(true);
         body.addView(status);
 
@@ -74,27 +82,28 @@ public final class MainActivity extends Activity {
             } catch (Throwable t) {
                 result = "Bundled RAW parity self-test FAILED\n" +
                         t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()) + "\n\n" +
-                        "No real/user DNG was decoded. User-selected DNG path remains identify-only.";
+                        "No real/user DNG was decoded. The original DNG path remains identify-only.";
             }
             final String text = result;
             runOnUiThread(() -> status.setText(text));
         }, "m11-synthetic-raw-selftest").start();
     }
 
-    private void chooseDng() {
+    private void chooseDng(int requestCode) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
                 "image/x-adobe-dng", "image/dng", "application/octet-stream"
         });
-        startActivityForResult(intent, REQUEST_OPEN_DNG);
+        startActivityForResult(intent, requestCode);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_OPEN_DNG || resultCode != RESULT_OK || data == null) return;
+        if ((requestCode != REQUEST_IDENTIFY_DNG && requestCode != REQUEST_REAL_RAW_PROBE) ||
+                resultCode != RESULT_OK || data == null) return;
         Uri uri = data.getData();
         if (uri == null) return;
         int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
@@ -103,8 +112,27 @@ public final class MainActivity extends Activity {
         } catch (SecurityException ignored) {
             // Some providers grant temporary access only; sufficient for this session.
         }
-        status.setText("Reading Java DNG metadata and native LibRaw identification only…");
-        new Thread(() -> inspectDng(uri), "m11-dng-inspect").start();
+
+        if (requestCode == REQUEST_IDENTIFY_DNG) {
+            status.setText("Reading Java DNG metadata and native LibRaw identification only…");
+            new Thread(() -> inspectDng(uri), "m11-dng-inspect").start();
+        } else {
+            status.setText("Running explicitly selected real Xiaomi DNG through gated LibRaw unpack + AHD hash probe…");
+            new Thread(() -> runRealRawProbe(uri), "m11-realraw-probe").start();
+        }
+    }
+
+    private void runRealRawProbe(Uri uri) {
+        String result;
+        try {
+            result = describeDocument(uri) + "\n\n" + M11RealRawProbe.run(this, uri);
+        } catch (Throwable t) {
+            result = "Real Xiaomi RAW probe FAILED\n" +
+                    t.getClass().getSimpleName() + ": " + String.valueOf(t.getMessage()) + "\n\n" +
+                    "The native gate refuses non-matching inputs. M11 renderer was not invoked.";
+        }
+        final String text = result;
+        runOnUiThread(() -> status.setText(text));
     }
 
     private void inspectDng(Uri uri) {
@@ -168,12 +196,12 @@ public final class MainActivity extends Activity {
                     }
                 }
             }
-            s.append("\n\nUser-DNG boundary status\n")
+            s.append("\n\nOriginal user-DNG identify boundary status\n")
                     .append("LibRaw open/identify: ENABLED for diagnostics only.\n")
-                    .append("RAW unpack: DISABLED for selected DNG.\n")
-                    .append("AHD demosaic: DISABLED for selected DNG.\n")
+                    .append("RAW unpack: DISABLED in this identify path.\n")
+                    .append("AHD demosaic: DISABLED in this identify path.\n")
                     .append("M11 renderer hookup to native RAW pixels: DISABLED.\n")
-                    .append("The separate bundled synthetic self-test does not alter this boundary.");
+                    .append("The separate explicit real-Xiaomi probe does not alter this identify-only boundary.");
             result = s.toString();
         } catch (Exception e) {
             result = "DNG inspection failed\n" + e.getClass().getSimpleName() + ": " + e.getMessage();
