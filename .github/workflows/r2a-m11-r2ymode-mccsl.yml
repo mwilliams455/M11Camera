@@ -5,6 +5,7 @@ on:
     branches: [work/render1h-cat42yq3a-placement1a]
     paths:
       - 'tools/trace_m11_r2ymode_mccsl.py'
+      - 'tools/trace_m11_mccsl_runtime_source.py'
       - '.github/workflows/r2a-m11-r2ymode-mccsl.yml'
       - 'tools/decompress_m11.py'
   workflow_dispatch:
@@ -82,7 +83,14 @@ jobs:
           mkdir -p /tmp/mccsl
           python tools/trace_m11_r2ymode_mccsl.py /tmp/M11P.bin \
             --output /tmp/mccsl/r2ymode_mccsl.md --top 20
-          cat /tmp/mccsl/r2ymode_mccsl.md
+
+      - name: Trace Leica MCCSL runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/trace_m11_mccsl_runtime_source.py /tmp/M11P.bin \
+            --output /tmp/mccsl/mccsl_runtime_source.md
+          cat /tmp/mccsl/mccsl_runtime_source.md
 
       - name: Upload derived trace only
         if: always()
