@@ -1,0 +1,77 @@
+name: R2A M11 Cat24 Cat42 region
+
+on:
+  push:
+    branches: [work/render1g-cat42c1a-orient1a]
+    paths:
+      - '.github/workflows/r2a-m11-cat24-42-region.yml'
+      - 'tools/trace_m11_r2y_cat24_42_region.py'
+      - 'tools/decompress_m11.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Acquire exact hash-gated M11-P updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/154.0 Safari/537.36'
+          out=/tmp/LEICA_M11-P_2.6.1.FW
+          expected_sha='0618ccb180cf3aa8979b04c0851e127753cd6aff3aaffee737abc52388363b83'
+          verify() { [ -f "$out" ] && [ "$(stat -c%s "$out")" = '63621633' ] && [ "$(sha256sum "$out"|awk '{print $1}')" = "$expected_sha" ]; }
+          rm -f "$out"
+          for url in \
+            'https://www.leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW' \
+            'https://leica-camera.com/sites/default/files/LEICA_M11-P_2.6.1.FW?download=1'; do
+            curl --http1.1 -L --fail --retry 1 --retry-all-errors -A "$ua" -o "$out" "$url" || true
+            verify && break
+          done
+          if ! verify; then
+            popup='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+            curl --http1.1 -L --fail -A "$ua" -o /tmp/tld.html "$popup"
+            python - <<'PY' >/tmp/urls
+          import re
+          from html import unescape
+          from pathlib import Path
+          from urllib.parse import urljoin
+          base='https://www.touslesdrivers.com/php/constructeurs/telechargement.php?v_code=84657&v_langue=fr'
+          text=Path('/tmp/tld.html').read_text(errors='replace')
+          seen=set()
+          for raw in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''',text,re.I):
+              u=urljoin(base,unescape(raw)); low=u.lower()
+              if u not in seen and ('fichiers.touslesdrivers.com' in low or 'leica-camera.com' in low) and ('84657' in low or '.fw' in low):
+                  print(u); seen.add(u)
+          PY
+            while IFS= read -r url; do
+              [ -n "$url" ] || continue
+              curl --http1.1 -L --fail -A "$ua" -e "$popup" -o "$out" "$url" || true
+              verify && break
+            done </tmp/urls
+          fi
+          verify
+      - name: Decompress and hash gate
+        run: |
+          python tools/decompress_m11.py /tmp/LEICA_M11-P_2.6.1.FW -o /tmp/M11P.bin
+          test "$(stat -c%s /tmp/M11P.bin)" = '97644400'
+          echo '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c  /tmp/M11P.bin' | sha256sum -c -
+      - name: Install trace dependency
+        run: python -m pip install --quiet capstone
+      - name: Trace wrapper region
+        run: |
+          mkdir -p /tmp/cat24-42
+          python tools/trace_m11_r2y_cat24_42_region.py /tmp/M11P.bin --output /tmp/cat24-42/cat24_42_region.md
+          cat /tmp/cat24-42/cat24_42_region.md
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-cat24-42-region
+          path: /tmp/cat24-42/*
+          retention-days: 14
