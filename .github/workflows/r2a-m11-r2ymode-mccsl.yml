@@ -5,6 +5,7 @@ on:
     branches: [work/render1h-cat42yq3a-placement1a]
     paths:
       - 'tools/trace_m11_mccsl_runtime_source.py'
+      - 'tools/trace_m11_r2y_control_builder.py'
       - '.github/workflows/r2a-m11-r2ymode-mccsl.yml'
       - 'tools/decompress_m11.py'
   workflow_dispatch:
@@ -75,20 +76,20 @@ jobs:
       - name: Install trace dependency
         run: python -m pip install --quiet capstone
 
-      - name: Trace Leica MCCSL runtime source
+      - name: Trace R2Y common-control builder
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/mccsl
-          python tools/trace_m11_mccsl_runtime_source.py /tmp/M11P.bin \
-            --output /tmp/mccsl/mccsl_runtime_source.md
-          cat /tmp/mccsl/mccsl_runtime_source.md
+          python tools/trace_m11_r2y_control_builder.py /tmp/M11P.bin \
+            --output /tmp/mccsl/r2y_control_builder.md
+          cat /tmp/mccsl/r2y_control_builder.md
 
       - name: Upload derived trace only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r2a-m11-r2ymode-mccsl-runtime
+          name: r2a-m11-r2ymode-mccsl-builder
           path: /tmp/mccsl/*
           retention-days: 14
           if-no-files-found: warn
