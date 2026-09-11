@@ -4,7 +4,7 @@ import argparse,hashlib,struct
 from pathlib import Path
 from capstone import Cs,CS_ARCH_ARM,CS_MODE_ARM,CS_MODE_LITTLE_ENDIAN
 from capstone.arm import ARM_OP_IMM,ARM_OP_MEM,ARM_OP_REG
-EXPECTED='28528c24555f93ff69b6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
+EXPECTED='28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
 ENTRY=0x0170AF48
 END=0x0170BB1C
 DELTA=0x3FAA87D0
@@ -61,7 +61,6 @@ def frame_sub(ins):
     if x.reg_name(a.reg)=='sp' and x.reg_name(b.reg)=='sp':rows.append((x.address,int(c.imm)))
  return rows
 def local_pointer_calls(ins):
- # Capture BL callsites and preceding ~12 instructions to expose fp/sp local pointer setup.
  out=[]
  for i,x in enumerate(ins):
   t=bl_target(x.address,u32(DATA,x.address))
@@ -101,7 +100,6 @@ def main():
   L += [f'### call `0x{p:08X}` -> `0x{t:08X}` {KNOWN.get(t,"")}','```asm']+[f'0x{x.address:08X}: {x.mnemonic} {x.op_str}' for x in ctx]+['```','']
  L += ['## Stack/frame memory-offset inventory','']
  rows=mem_offsets(ins)
- # Summarize offsets and then give contexts for stores in the aggregate neighborhood.
  vals=sorted(set((b,o) for _,_,b,o,_ in rows),key=lambda z:(z[0],z[1]))
  L.append(f'- distinct fp/sp offsets: `{[(b,hex(o) if o>=0 else "-"+hex(-o)) for b,o in vals]}`')
  L += ['','## Stores around the exact 3x3 basis aggregate','```asm']
