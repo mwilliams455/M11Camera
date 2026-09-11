@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Trace the Leica M11-P runtime source for R2YMODE.MCCSL.
 
-Prior hash-gated discovery pinned the true F_R2Y common-control programmer:
-  setter entry 0x01B1CDA4
-  MCCSL source byte [control + 0x67]
-  R2YMODE bit 4 write at 0x01B1D3A0..0x01B1D3AC
+Closed anchors from the preceding exact-firmware trace:
+  true R2Y common-control setter 0x01B1CDA4
+  R2YMODE.MCCSL source byte [control + 0x67]
+  bit-4 write 0x01B1D3A0..0x01B1D3AC
   sole direct caller 0x0176FE60
 
-This pass follows the caller-side r1/control pointer, reports all writes to the
-+0x67 field in the containing function, and searches the canonical image for
-other code accesses to +0x67 near calls into the same setter. It deliberately
-separates 'setter ABI closed' from 'still-photo runtime value closed'.
+This focused pass follows that caller only, then uses a cheap raw A32 scan for
+other +0x67 memory accesses. It avoids a full 16 MB Capstone-detail decode.
 """
 from __future__ import annotations
 
@@ -27,7 +25,8 @@ SETTER = 0x01B1CDA4
 CALLSITE = 0x0176FE60
 MCCSL_WRITE = 0x01B1D3A0
 MCCSL_FIELD = 0x67
-BASE_TABLE = 0x43201224
+CODE_LO = 0x01000000
+CODE_HI = 0x02000000
 
 
 def u32(d: bytes, p: int) -> int:
@@ -61,28 +60,34 @@ def disasm(d: bytes, lo: int, hi: int):
 
 
 def safe_ops(i):
-    """Capstone skipdata pseudo-instructions have no operand detail."""
     try:
         return i.operands
     except CsError:
         return ()
 
 
+def rname(i, op) -> str | None:
+    return i.reg_name(op.reg) if op.type == ARM_OP_REG else None
+
+
+def fmt(i) -> str:
+    return f"0x{i.address:08x}: {i.mnemonic} {i.op_str}"
+
+
 def find_entry(d: bytes, addr: int, max_back: int = 0x3000) -> int:
     lo = max(0, addr - max_back) & ~3
-    candidates = []
-    for p in range(lo, addr + 1, 4):
-        if is_push_lr(u32(d, p)):
-            candidates.append(p)
-    if not candidates:
-        return lo
+    candidates = [p for p in range(lo, addr + 1, 4) if is_push_lr(u32(d, p))]
     for e in reversed(candidates):
+        reached = False
         for i in disasm(d, e, addr + 8):
             if i.address >= addr:
-                return e
+                reached = True
+                break
             if i.address > e + 8 and ((i.mnemonic == "pop" and "pc" in i.op_str) or (i.mnemonic == "bx" and i.op_str.strip() == "lr")):
                 break
-    return candidates[-1]
+        if reached:
+            return e
+    return candidates[-1] if candidates else lo
 
 
 def function_end(d: bytes, e: int, cap: int = 0x5000) -> int:
@@ -92,39 +97,42 @@ def function_end(d: bytes, e: int, cap: int = 0x5000) -> int:
     return min(len(d), e + cap)
 
 
-def rname(i, op) -> str | None:
-    return i.reg_name(op.reg) if op.type == ARM_OP_REG else None
-
-
-def imm(i, op) -> int | None:
-    return int(op.imm) if op.type == ARM_OP_IMM else None
-
-
-def fmt(i) -> str:
-    return f"0x{i.address:08x}: {i.mnemonic} {i.op_str}"
-
-
-def accesses_field(i, disp: int) -> bool:
-    for op in safe_ops(i):
-        if op.type == ARM_OP_MEM and int(op.mem.disp) == disp:
-            return True
-    return False
-
-
-def writes_register(i, reg: str) -> bool:
+def writes_reg(i, reg: str) -> bool:
     ops = safe_ops(i)
-    if not ops:
+    if not ops or i.mnemonic in ("cmp", "tst", "str", "strb", "strh", ".byte"):
         return False
-    return rname(i, ops[0]) == reg and i.mnemonic not in ("cmp", "tst", "str", "strb", "strh")
+    return rname(i, ops[0]) == reg
 
 
-def last_writers(insns, idx: int, regs=("r0", "r1"), window: int = 100):
-    out = {}
-    for reg in regs:
-        for j in range(idx - 1, max(-1, idx - window), -1):
-            if writes_register(insns[j], reg):
-                out[reg] = insns[j]
-                break
+def last_writer(insns, idx: int, reg: str, window: int = 160):
+    for j in range(idx - 1, max(-1, idx - window), -1):
+        if writes_reg(insns[j], reg):
+            return insns[j]
+    return None
+
+
+def mem_disp(i) -> int | None:
+    for op in safe_ops(i):
+        if op.type == ARM_OP_MEM:
+            return int(op.mem.disp)
+    return None
+
+
+def raw_sdt_plus67_sites(d: bytes) -> list[int]:
+    """A32 single-data-transfer immediate instructions with U=1, imm12=0x67."""
+    out = []
+    hi = min(len(d), CODE_HI) & ~3
+    for p in range(CODE_LO, hi, 4):
+        w = u32(d, p)
+        cond = (w >> 28) & 0xF
+        if cond == 0xF:
+            continue
+        if ((w >> 26) & 0x3) != 0x1 or ((w >> 25) & 1):
+            continue
+        if ((w >> 23) & 1) != 1:
+            continue
+        if (w & 0xFFF) == MCCSL_FIELD:
+            out.append(p)
     return out
 
 
@@ -135,25 +143,6 @@ def direct_callers(d: bytes, target: int) -> list[int]:
         if bl_target(p, u32(d, p)) == target:
             out.append(p)
     return out
-
-
-def mov_abs_before(insns, idx: int, reg: str, window: int = 40) -> int | None:
-    lo = max(0, idx - window)
-    val = None
-    for j in range(lo, idx):
-        i = insns[j]
-        ops = safe_ops(i)
-        if not ops or rname(i, ops[0]) != reg:
-            continue
-        if i.mnemonic in ("mov", "movw") and len(ops) >= 2:
-            x = imm(i, ops[1])
-            if x is not None:
-                val = x & 0xFFFF
-        elif i.mnemonic == "movt" and len(ops) >= 2 and val is not None:
-            x = imm(i, ops[1])
-            if x is not None:
-                val |= (x & 0xFFFF) << 16
-    return val
 
 
 def main() -> None:
@@ -167,101 +156,91 @@ def main() -> None:
         raise ValueError(f"unexpected unpacked SHA-256 {digest}")
 
     callers = direct_callers(d, SETTER)
-    caller_entry = find_entry(d, CALLSITE)
-    caller_end = function_end(d, caller_entry)
-    ins = disasm(d, caller_entry, caller_end)
+    entry = find_entry(d, CALLSITE)
+    end = function_end(d, entry)
+    ins = disasm(d, entry, end)
     ci = next((n for n, i in enumerate(ins) if i.address == CALLSITE), None)
     if ci is None:
         raise RuntimeError("pinned callsite not inside recovered caller")
-    writers = last_writers(ins, ci, ("r0", "r1"), 120)
 
-    field_accesses = [i for i in ins if accesses_field(i, MCCSL_FIELD)]
-
-    nearby_byte_stores = []
+    r0w = last_writer(ins, ci, "r0")
+    r1w = last_writer(ins, ci, "r1")
+    local67 = [i for i in ins if mem_disp(i) == MCCSL_FIELD]
+    stores_band = []
     for i in ins:
         ops = safe_ops(i)
         if i.mnemonic != "strb" or len(ops) < 2 or ops[1].type != ARM_OP_MEM:
             continue
         disp = int(ops[1].mem.disp)
         if 0x50 <= disp <= 0x75:
-            nearby_byte_stores.append(i)
+            stores_band.append(i)
 
-    global_field_sites = []
-    code_lo, code_hi = 0x01000000, min(len(d), 0x02000000)
-    all_ins = disasm(d, code_lo, code_hi)
-    for n, i in enumerate(all_ins):
-        if not accesses_field(i, MCCSL_FIELD):
-            continue
+    raw67 = raw_sdt_plus67_sites(d)
+    ranked = []
+    for p in raw67:
         score = 0
-        lo = max(0, n - 32); hi = min(len(all_ins), n + 33)
-        win = all_ins[lo:hi]
-        if any(bl_target(x.address, u32(d, x.address)) == SETTER for x in win):
+        if entry <= p < end:
             score += 100
-        for k, x in enumerate(win):
-            xops = safe_ops(x)
-            if x.mnemonic == "movw" and len(xops) >= 2:
-                xv = imm(x, xops[1])
-                if xv == (BASE_TABLE & 0xFFFF):
-                    for y in win[k + 1:k + 6]:
-                        yops = safe_ops(y)
-                        if y.mnemonic == "movt" and len(yops) >= 2 and rname(y, yops[0]) == rname(x, xops[0]):
-                            yv = imm(y, yops[1])
-                            if yv == ((BASE_TABLE >> 16) & 0xFFFF):
-                                score += 50
-                                break
-        if i.mnemonic.startswith("str"):
-            score += 10
-        global_field_sites.append((score, i.address, i))
-    global_field_sites.sort(reverse=True, key=lambda x: (x[0], -x[1]))
+        if abs(p - CALLSITE) <= 0x800:
+            score += 60
+        if abs(p - SETTER) <= 0x3000:
+            score += 40
+        # Cheap caller proximity check.
+        for q in range(max(CODE_LO, p - 0x100), min(CODE_HI, p + 0x104), 4):
+            if bl_target(q, u32(d, q)) == SETTER:
+                score += 80
+                break
+        one = disasm(d, p, p + 4)
+        text = fmt(one[0]) if one else f"0x{p:08x}: <decode failed>"
+        ranked.append((score, p, text))
+    ranked.sort(key=lambda x: (-x[0], x[1]))
 
+    c0 = max(0, ci - 200)
+    c1 = min(len(ins), ci + 100)
     lines = [
         "# M11-P MCCSL runtime source trace",
         "",
         f"- exact unpacked SHA-256: `{digest}`",
-        f"- pinned true R2Y common-control setter: `0x{SETTER:08x}`",
-        f"- pinned MCCSL hardware write: `0x{MCCSL_WRITE:08x}`",
-        f"- setter source field: `[control + 0x{MCCSL_FIELD:02x}]`",
-        f"- direct callers of setter: `{[hex(x) for x in callers]}`",
-        f"- pinned direct caller: `0x{CALLSITE:08x}`",
-        f"- recovered containing function: `0x{caller_entry:08x}..0x{caller_end:08x}`",
+        f"- true R2Y common-control setter: `0x{SETTER:08x}`",
+        f"- MCCSL bit-4 write: `0x{MCCSL_WRITE:08x}`",
+        f"- setter source byte: `[control + 0x{MCCSL_FIELD:02x}]`",
+        f"- direct setter callers: `{[hex(x) for x in callers]}`",
+        f"- direct callsite: `0x{CALLSITE:08x}`",
+        f"- containing function: `0x{entry:08x}..0x{end:08x}`",
         "",
-        "## Last argument writers before the setter call",
+        "## Last argument writers before 0x0176FE60",
+        "",
+        f"- r0: `{fmt(r0w) if r0w else 'not recovered'}`",
+        f"- r1: `{fmt(r1w) if r1w else 'not recovered'}`",
+        "",
+        "## +0x67 accesses in the direct caller",
         "",
     ]
-    for reg in ("r0", "r1"):
-        i = writers.get(reg)
-        lines.append(f"- {reg}: `{fmt(i) if i else 'not recovered'}`")
-
-    lines += ["", "## +0x67 accesses inside the direct caller", ""]
-    if field_accesses:
-        lines += ["```asm", *[fmt(i) for i in field_accesses], "```"]
+    if local67:
+        lines += ["```asm", *[fmt(i) for i in local67], "```"]
     else:
-        lines.append("No direct `+0x67` access in the containing caller function.")
+        lines.append("No literal +0x67 memory access in this containing function.")
 
-    lines += ["", "## Nearby control-byte stores (+0x50..+0x75) inside direct caller", ""]
-    if nearby_byte_stores:
-        lines += ["```asm", *[fmt(i) for i in nearby_byte_stores], "```"]
+    lines += ["", "## Byte stores in caller control-field band +0x50..+0x75", ""]
+    if stores_band:
+        lines += ["```asm", *[fmt(i) for i in stores_band], "```"]
     else:
-        lines.append("No byte stores in this offset band.")
+        lines.append("No byte stores in this band.")
 
-    c0 = max(0, ci - 160); c1 = min(len(ins), ci + 81)
-    lines += ["", "## Direct caller context around setter call", "", "```asm"]
+    lines += ["", "## Caller context around hardware-setter call", "", "```asm"]
     lines += [fmt(i) for i in ins[c0:c1]]
-    lines += ["```", ""]
-
-    lines += ["## Whole direct caller (audit)", "", "```asm"]
+    lines += ["```", "", "## Whole containing caller", "", "```asm"]
     lines += [fmt(i) for i in ins]
-    lines += ["```", ""]
-
-    lines += ["## Global +0x67 access candidates", ""]
-    for rank, (score, addr, i) in enumerate(global_field_sites[:80], 1):
-        lines.append(f"{rank}. score `{score}` — `{fmt(i)}`")
+    lines += ["```", "", "## Raw A32 +0x67 access sites ranked", ""]
+    lines.append(f"Total single-data-transfer +0x67 sites in 0x01000000..0x02000000: `{len(raw67)}`")
+    for n, (score, p, text) in enumerate(ranked[:120], 1):
+        lines.append(f"{n}. score `{score}` — `{text}`")
 
     lines += [
         "",
         "## Decision boundary",
         "",
-        "The setter ABI is closed: R2YMODE.MCCSL bit 4 is sourced from control byte +0x67. The Leica still-photo runtime state becomes closed only when the caller/upstream builder proves that byte is 0 or 1 for the relevant path. Do not alter renderer MCC placement from the setter alone.",
+        "MCCSL setter semantics are closed. Leica still-photo placement becomes closed only when the upstream control source proves byte +0x67 is 0 or 1 on the relevant path. No renderer change is justified by setter identity alone.",
         "",
     ]
     a.output.parent.mkdir(parents=True, exist_ok=True)
