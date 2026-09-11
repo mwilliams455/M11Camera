@@ -25,17 +25,17 @@ add_subdirectory("${M11_LIBRAW_CMAKE_PATH}" "${CMAKE_BINARY_DIR}/libraw")
 find_library(M11_Z_LIB z REQUIRED)
 find_library(M11_JNIGRAPHICS_LIB jnigraphics REQUIRED)
 
-# The original identify, synthetic parity, REALRAW probe and REALRAW1C export
-# paths retain their existing boundaries.  RENDER1A/RENDER1H remains intact.
-# B2RWBPLACE1A is additive and exists only on the experiment branch so the
-# validated baseline JNI entry remains available for controlled A/B work.
+# RENDER1H remains intact. COLORBACK1A reuses the complete B2RWBPLACE1A
+# implementation and changes only Cat42 chroma suppression at the final
+# validated renderer call. The original candidate source is included by the
+# wrapper and must not be compiled as a second translation unit.
 add_library(m11rawjni SHARED
     m11_raw_jni.cpp
     m11_raw_selftest_jni.cpp
     m11_realraw_probe_jni.cpp
     m11_realraw_export_jni.cpp
     m11_render_jni.cpp
-    m11_render_b2rwb_jni.cpp
+    m11_render_colorback_jni.cpp
 )
 target_compile_features(m11rawjni PRIVATE cxx_std_17)
 target_compile_options(m11rawjni PRIVATE -fvisibility=hidden)
