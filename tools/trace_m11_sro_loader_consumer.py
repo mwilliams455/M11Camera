@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Triggered after workflow creation so the path-filtered research job runs.
 from __future__ import annotations
 import argparse, hashlib, struct
 from pathlib import Path
@@ -56,16 +55,28 @@ def nearby_strings(ins,whole):
                 break
     return rows
 
-def movw_movt_refs(md,code,target):
+def decode_mov16(w,which):
+    # A32 MOVW/MOVT A1: cond 00110{0/1}00 imm4 Rd imm12.
+    tag=w & 0x0ff00000
+    want=0x03000000 if which=='movw' else 0x03400000
+    if tag!=want: return None
+    rd=(w>>12)&0xf
+    imm=((w>>4)&0xf000)|(w&0xfff)
+    return rd,imm
+
+def movw_movt_refs(code,target):
     refs=[]
-    ins=list(md.disasm(code,START))
-    for i,x in enumerate(ins):
-        if x.mnemonic!='movw' or len(x.operands)<2 or x.operands[1].type!=ARM_OP_IMM: continue
-        reg=x.operands[0].reg; low=x.operands[1].imm&0xffff
-        for y in ins[i+1:i+8]:
-            if y.mnemonic=='movt' and len(y.operands)>=2 and y.operands[0].type==ARM_OP_REG and y.operands[0].reg==reg and y.operands[1].type==ARM_OP_IMM:
-                v=((y.operands[1].imm&0xffff)<<16)|low
-                if v==target: refs.append((x.address,y.address))
+    for q in range(0,len(code)-4,4):
+        w=struct.unpack_from('<I',code,q)[0]
+        m=decode_mov16(w,'movw')
+        if not m: continue
+        rd,low=m
+        for r in range(q+4,min(q+32,len(code)-3),4):
+            y=struct.unpack_from('<I',code,r)[0]
+            mt=decode_mov16(y,'movt')
+            if mt and mt[0]==rd:
+                v=((mt[1]&0xffff)<<16)|(low&0xffff)
+                if v==target: refs.append((START+q,START+r))
                 break
     return refs
 
@@ -119,7 +130,7 @@ def main():
     L += ["## Exact payload/string occurrences",f"- `img/data/sro.bin` hits: `{[hex(x) for x in name_hits]}`",f"- exact corrected third-Q9 36-byte hits: `{[hex(x) for x in third_hits]}`",""]
 
     for label,target in targets:
-        refs=movw_movt_refs(md,code,target)
+        refs=movw_movt_refs(code,target)
         emit_refs(L,f"References to {label} = `0x{target:08X}`",refs,md,code,whole)
         literal=struct.pack('<I',target)
         lits=[p for p in all_occurrences(whole,literal) if START<=p<END]
