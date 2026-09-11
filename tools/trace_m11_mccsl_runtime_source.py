@@ -9,7 +9,7 @@ Prior hash-gated discovery pinned the true F_R2Y common-control programmer:
 
 This pass follows the caller-side r1/control pointer, reports all writes to the
 +0x67 field in the containing function, and searches the canonical image for
-other code accesses to +0x67 near calls into the same setter.  It deliberately
+other code accesses to +0x67 near calls into the same setter. It deliberately
 separates 'setter ABI closed' from 'still-photo runtime value closed'.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ import hashlib
 import struct
 from pathlib import Path
 
-from capstone import Cs, CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_LITTLE_ENDIAN
+from capstone import Cs, CsError, CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_LITTLE_ENDIAN
 from capstone.arm import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG
 
 EXPECTED_SHA = "28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c"
@@ -60,6 +60,14 @@ def disasm(d: bytes, lo: int, hi: int):
     return list(md().disasm(d[lo:hi], lo))
 
 
+def safe_ops(i):
+    """Capstone skipdata pseudo-instructions have no operand detail."""
+    try:
+        return i.operands
+    except CsError:
+        return ()
+
+
 def find_entry(d: bytes, addr: int, max_back: int = 0x3000) -> int:
     lo = max(0, addr - max_back) & ~3
     candidates = []
@@ -68,8 +76,6 @@ def find_entry(d: bytes, addr: int, max_back: int = 0x3000) -> int:
             candidates.append(p)
     if not candidates:
         return lo
-    # Prefer a candidate whose decoded function reaches the callsite without an
-    # earlier return.  Walk newest-to-oldest.
     for e in reversed(candidates):
         for i in disasm(d, e, addr + 8):
             if i.address >= addr:
@@ -99,16 +105,17 @@ def fmt(i) -> str:
 
 
 def accesses_field(i, disp: int) -> bool:
-    for op in i.operands:
+    for op in safe_ops(i):
         if op.type == ARM_OP_MEM and int(op.mem.disp) == disp:
             return True
     return False
 
 
 def writes_register(i, reg: str) -> bool:
-    if not i.operands:
+    ops = safe_ops(i)
+    if not ops:
         return False
-    return rname(i, i.operands[0]) == reg and i.mnemonic not in ("cmp", "tst", "str", "strb", "strh")
+    return rname(i, ops[0]) == reg and i.mnemonic not in ("cmp", "tst", "str", "strb", "strh")
 
 
 def last_writers(insns, idx: int, regs=("r0", "r1"), window: int = 100):
@@ -135,14 +142,15 @@ def mov_abs_before(insns, idx: int, reg: str, window: int = 40) -> int | None:
     val = None
     for j in range(lo, idx):
         i = insns[j]
-        if not i.operands or rname(i, i.operands[0]) != reg:
+        ops = safe_ops(i)
+        if not ops or rname(i, ops[0]) != reg:
             continue
-        if i.mnemonic in ("mov", "movw") and len(i.operands) >= 2:
-            x = imm(i, i.operands[1])
+        if i.mnemonic in ("mov", "movw") and len(ops) >= 2:
+            x = imm(i, ops[1])
             if x is not None:
                 val = x & 0xFFFF
-        elif i.mnemonic == "movt" and len(i.operands) >= 2 and val is not None:
-            x = imm(i, i.operands[1])
+        elif i.mnemonic == "movt" and len(ops) >= 2 and val is not None:
+            x = imm(i, ops[1])
             if x is not None:
                 val |= (x & 0xFFFF) << 16
     return val
@@ -167,24 +175,17 @@ def main() -> None:
         raise RuntimeError("pinned callsite not inside recovered caller")
     writers = last_writers(ins, ci, ("r0", "r1"), 120)
 
-    # Every literal +0x67 memory access in the containing wrapper is worth
-    # auditing because one may initialize/copy the field ultimately consumed by
-    # the hardware setter.
     field_accesses = [i for i in ins if accesses_field(i, MCCSL_FIELD)]
 
-    # Also collect nearby byte stores with small offsets; these reveal whether
-    # the caller builds a compact control structure field-by-field.
     nearby_byte_stores = []
     for i in ins:
-        if i.mnemonic != "strb" or len(i.operands) < 2 or i.operands[1].type != ARM_OP_MEM:
+        ops = safe_ops(i)
+        if i.mnemonic != "strb" or len(ops) < 2 or ops[1].type != ARM_OP_MEM:
             continue
-        disp = int(i.operands[1].mem.disp)
+        disp = int(ops[1].mem.disp)
         if 0x50 <= disp <= 0x75:
             nearby_byte_stores.append(i)
 
-    # Search code for accesses to +0x67 and rank contexts that also contain the
-    # pinned base-table literal or a direct call to the setter. This is not used
-    # as a substitute for exact caller tracing; it helps find upstream builders.
     global_field_sites = []
     code_lo, code_hi = 0x01000000, min(len(d), 0x02000000)
     all_ins = disasm(d, code_lo, code_hi)
@@ -196,14 +197,15 @@ def main() -> None:
         win = all_ins[lo:hi]
         if any(bl_target(x.address, u32(d, x.address)) == SETTER for x in win):
             score += 100
-        # Detect 0x43201224 construction in the local window.
         for k, x in enumerate(win):
-            if x.mnemonic == "movw" and len(x.operands) >= 2:
-                xv = imm(x, x.operands[1])
+            xops = safe_ops(x)
+            if x.mnemonic == "movw" and len(xops) >= 2:
+                xv = imm(x, xops[1])
                 if xv == (BASE_TABLE & 0xFFFF):
                     for y in win[k + 1:k + 6]:
-                        if y.mnemonic == "movt" and len(y.operands) >= 2 and rname(y, y.operands[0]) == rname(x, x.operands[0]):
-                            yv = imm(y, y.operands[1])
+                        yops = safe_ops(y)
+                        if y.mnemonic == "movt" and len(yops) >= 2 and rname(y, yops[0]) == rname(x, xops[0]):
+                            yv = imm(y, yops[1])
                             if yv == ((BASE_TABLE >> 16) & 0xFFFF):
                                 score += 50
                                 break
@@ -242,7 +244,6 @@ def main() -> None:
     else:
         lines.append("No byte stores in this offset band.")
 
-    # Caller context centered around the call.
     c0 = max(0, ci - 160); c1 = min(len(ins), ci + 81)
     lines += ["", "## Direct caller context around setter call", "", "```asm"]
     lines += [fmt(i) for i in ins[c0:c1]]
