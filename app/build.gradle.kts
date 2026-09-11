@@ -13,11 +13,11 @@ android {
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = "com.m11.diagnostic.b2rwbplace1a"
+        applicationId = "com.m11.diagnostic.colorrestore1a"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.1.11-render1h-b2rwbplace1a"
+        versionCode = 14
+        versionName = "0.1.13-render1h-b2rwbplace1a-colorrestore1a-orientfix1a"
 
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
 
