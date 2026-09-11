@@ -29,11 +29,17 @@ def md():
  c=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN); c.skipdata=True; return c
 
 def branch_target(p,w):
- # ARM B/BL A1, excluding BLX immediate.
  if ((w>>25)&7)!=5 or ((w>>28)&0xF)==0xF: return None
  imm=w&0xFFFFFF
  if imm&0x800000: imm-=1<<24
  return (p+8+(imm<<2))&0xFFFFFFFF
+
+def mov_imm(w,kind):
+ # ARM A1 MOVW/MOVT immediate form.
+ tag=w & 0x0FF00000; want=0x03000000 if kind=='movw' else 0x03400000
+ if tag!=want: return None
+ rd=(w>>12)&0xF; imm=(((w>>16)&0xF)<<12)|(w&0xFFF)
+ return rd,imm
 
 def dis(d,lo,hi): return list(md().disasm(d[lo:hi],lo))
 def excerpt(d,center,before=0x100,after=0x30):
@@ -45,33 +51,33 @@ def main():
  d=a.unpacked.read_bytes(); h=hashlib.sha256(d).hexdigest()
  if h!=EXPECTED_SHA: raise ValueError(h)
 
- # Exact 32-bit address occurrences, aligned and unaligned, to reveal function tables.
  needle=struct.pack('<I',ENTRY); refs=[]; p=0
  while True:
   p=d.find(needle,p)
   if p<0: break
   refs.append(p); p+=1
 
- # Direct B/BL references, not only BL.
  branches=[]
- for p in range(0x01000000,min(0x02000000,len(d))-4,4):
+ lo=0x01000000; hi=min(0x02000000,len(d))
+ for p in range(lo,hi-4,4):
   t=branch_target(p,u32(d,p))
   if t==ENTRY: branches.append((p,(u32(d,p)>>24)&1))
 
- # MOVW/MOVT construction of the function address (D324/01B2).
+ # Raw ARM MOVW/MOVT scan for the exact entry pointer; no full-window Capstone pass.
  movpairs=[]
- ins=dis(d,0x01000000,min(0x02000000,len(d)))
- for i,x in enumerate(ins):
-  if x.mnemonic=='movw' and '#0xd324' in x.op_str:
-   reg=x.op_str.split(',',1)[0].strip()
-   for y in ins[i+1:i+8]:
-    if y.mnemonic=='movt' and y.op_str.startswith(reg+',') and '#0x1b2' in y.op_str:
-     movpairs.append((x.address,y.address,reg)); break
+ for p in range(lo,hi-4,4):
+  a0=mov_imm(u32(d,p),'movw')
+  if a0 is None or a0[1] != (ENTRY & 0xFFFF): continue
+  rd=a0[0]
+  for q in range(p+4,min(p+32,hi),4):
+   a1=mov_imm(u32(d,q),'movt')
+   if a1==(rd,(ENTRY>>16)&0xFFFF):
+    movpairs.append((p,q,rd)); break
 
  lines=['# M11-P MCC writer upstream/source trace','',f'- unpacked SHA-256: `{h}`',f'- writer: `0x{ENTRY:08x}..0x{END:08x}`',
         f'- raw little-endian entry-address references: `{[hex(x) for x in refs]}`',
         f'- direct ARM B/BL references: `{[(hex(p),"BL" if link else "B") for p,link in branches]}`',
-        f'- MOVW/MOVT entry-address constructions: `{[(hex(a),hex(b),r) for a,b,r in movpairs]}`','']
+        f'- MOVW/MOVT entry-address constructions: `{[(hex(a),hex(b),"r"+str(r)) for a,b,r in movpairs]}`','']
 
  lines += ['## Writer prologue','', '```asm']
  for x in dis(d,ENTRY,min(ENTRY+0x300,END)): lines.append(f'0x{x.address:08x}: {x.mnemonic} {x.op_str}')
@@ -82,9 +88,8 @@ def main():
  if refs:
   lines += ['## Raw entry-pointer reference neighborhoods','']
   for r in refs:
-   lo=max(0,r-64); hi=min(len(d),r+68)
-   words=[]
-   for q in range(lo+(4-lo%4)%4,hi-3,4): words.append(f'0x{q:08x}: 0x{u32(d,q):08x}')
+   rlo=max(0,r-64); rhi=min(len(d),r+68); words=[]
+   for q in range(rlo+(4-rlo%4)%4,rhi-3,4): words.append(f'0x{q:08x}: 0x{u32(d,q):08x}')
    lines += [f'### reference at `0x{r:08x}`','', '```text',*words,'```','']
 
  lines += ['## First hardware write of each MCC family: source-address context','']
