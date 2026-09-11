@@ -8,7 +8,9 @@ from extract_m11p_forensics import EXPECTED_UNPACKED_SHA
 
 START=0x01000000
 END=0x02000000
+WRAPPER=0x016DCE0C
 PRODUCER=0x016DCEB0
+AWB_REFRESH=0x016DF908
 SRC_BASE=0x4342F91C
 SRC_OFFS={0x4D8,0x4DC,0x4E0,0x4E4}
 DELTA=0x3FAA87D0
@@ -23,10 +25,7 @@ def branch_target(addr,w):
     return (addr+8 + sx(w&0xFFFFFF,24)*4) & 0xFFFFFFFF
 
 def str_imm(w):
-    # A32 STR/STRB immediate, pre-indexed or offset form.
-    if ((w>>26)&3)!=1 or ((w>>25)&1)!=0 or ((w>>20)&1)!=0:
-        return None
-    if ((w>>24)&1)==0:
+    if ((w>>26)&3)!=1 or ((w>>25)&1)!=0 or ((w>>20)&1)!=0 or ((w>>24)&1)==0:
         return None
     rn=(w>>16)&0xF; rt=(w>>12)&0xF; off=w&0xFFF
     if ((w>>23)&1)==0: off=-off
@@ -82,38 +81,41 @@ def contains_src_base(ins):
                 return True
     return False
 
+def emit_callers(L,title,callers,md,code,whole):
+    for addr in callers:
+        e=prologue(code,addr)
+        ins=disasm(md,code,max(e,addr-0x220),addr+0x140)
+        L += [f'## {title} caller `0x{addr:08X}`',f'- nearest function: `0x{e:08X}`','```asm']+[fmt(x) for x in ins]+['```','']
+        ss=strings(ins,whole)
+        if ss: L += ['strings:']+[f'- {lab} `0x{p:08X}`: `{s[:170]}`' for p,lab,s in ss]+['']
+
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('unpacked',type=Path); ap.add_argument('--output',type=Path,required=True); a=ap.parse_args()
     whole=a.unpacked.read_bytes(); h=hashlib.sha256(whole).hexdigest()
     if h!=EXPECTED_UNPACKED_SHA: raise ValueError(h)
     code=whole[START:END]
     md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN); md.detail=True; md.skipdata=True
-    callers=[]; stores=[]
+    wrapper_callers=[]; producer_callers=[]; refresh_callers=[]; stores=[]
     for q in range(0,len(code)-4,4):
-        w=struct.unpack_from('<I',code,q)[0]; addr=START+q
-        if branch_target(addr,w)==PRODUCER: callers.append(addr)
+        w=struct.unpack_from('<I',code,q)[0]; addr=START+q; target=branch_target(addr,w)
+        if target==WRAPPER: wrapper_callers.append(addr)
+        if target==PRODUCER: producer_callers.append(addr)
+        if target==AWB_REFRESH: refresh_callers.append(addr)
         st=str_imm(w)
         if st and st[2] in SRC_OFFS: stores.append((addr,st))
 
-    L=['# M11-P B2R gain producer provenance','',f'- SHA: `{h}`',f'- producer: `0x{PRODUCER:08X}`',f'- source state: `0x{SRC_BASE:08X} + 0x4D8/4DC/4E0/4E4`',f'- direct BL callers: `{len(callers)}`',f'- structural source-offset stores: `{len(stores)}`','']
-    for addr in callers:
-        e=prologue(code,addr)
-        ins=disasm(md,code,max(e,addr-0x180),addr+0x100)
-        L += [f'## producer caller `0x{addr:08X}`',f'- nearest function: `0x{e:08X}`','```asm']+[fmt(x) for x in ins]+['```','']
-        ss=strings(ins,whole)
-        if ss: L += ['strings:']+[f'- {lab} `0x{p:08X}`: `{s[:170]}`' for p,lab,s in ss]+['']
+    L=['# M11-P B2R gain producer provenance','',f'- SHA: `{h}`',f'- AWB wrapper: `0x{WRAPPER:08X}`',f'- producer: `0x{PRODUCER:08X}`',f'- AWB refresh: `0x{AWB_REFRESH:08X}`',f'- source state: `0x{SRC_BASE:08X} + 0x4D8/4DC/4E0/4E4`',f'- wrapper direct BL callers: `{len(wrapper_callers)}`',f'- producer direct BL callers: `{len(producer_callers)}`',f'- AWB-refresh direct BL callers: `{len(refresh_callers)}`',f'- structural source-offset stores: `{len(stores)}`','']
+    emit_callers(L,'AWB wrapper',wrapper_callers,md,code,whole)
+    emit_callers(L,'producer',producer_callers,md,code,whole)
+    emit_callers(L,'AWB refresh',refresh_callers,md,code,whole)
 
     grouped={}
     for addr,st in stores:
-        e=prologue(code,addr)
-        grouped.setdefault(e,[]).append((addr,st))
+        e=prologue(code,addr); grouped.setdefault(e,[]).append((addr,st))
     for e,rows in sorted(grouped.items()):
-        # Filter report emphasis by whether nearby code actually constructs source absolute base.
         merged=[]
         for addr,st in rows:
-            ins=disasm(md,code,addr-0x100,addr+0x100)
-            tied=contains_src_base(ins)
-            merged.append((addr,st,tied,ins))
+            ins=disasm(md,code,addr-0x100,addr+0x100); tied=contains_src_base(ins); merged.append((addr,st,tied,ins))
         if not any(x[2] for x in merged): continue
         L += [f'## source-state writer candidate function `0x{e:08X}`',f'- stores in function: `{len(rows)}`','']
         for addr,st,tied,ins in merged:
@@ -124,6 +126,6 @@ def main():
             if ss: L += ['strings:']+[f'- {lab} `0x{p:08X}`: `{s[:170]}`' for p,lab,s in ss]+['']
 
     L += ['## Decision boundary','',
-          'The +0x1AC/+0x1AE/+0x1B0 fields are now known to be populated by 0x016DCEB0 from global source-state values. Classify them as ordinary WB only if the caller/source writer chain ties those source values to AWB/gray-balance state; otherwise keep them as an unresolved Leica-domain gain.','']
+          'The B2R +0x1AC/+0x1AE/+0x1B0 triplet is populated from AWB module state. Close it as ordinary per-shot WB only when the wrapper caller shows the destination object is the same still-frame state later passed to B2R; otherwise retain that final object-identity gap.','']
     a.output.parent.mkdir(parents=True,exist_ok=True); a.output.write_text('\n'.join(L)+'\n'); print(a.output)
 if __name__=='__main__': main()
