@@ -69,6 +69,7 @@ def main():
         ins=dis(md,code,lo-0x60,hi+0x160)
         hits=[]
         for x in ins:
+            if x.id==0: continue
             for op in x.operands:
                 if op.type==ARM_OP_MEM and op.mem.base==rd and op.mem.disp==SRO_SLOT:
                     hits.append(x)
