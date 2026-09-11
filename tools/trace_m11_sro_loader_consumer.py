@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Triggered after workflow creation so the path-filtered research job runs.
 from __future__ import annotations
 import argparse, hashlib, struct
 from pathlib import Path
@@ -95,7 +96,6 @@ def main():
     third_pat=b''.join(struct.pack('<i',x) for x in THIRD_Q9)
     third_hits=all_occurrences(whole,third_pat)
 
-    # Decode the canonical 132-byte structure as three 44-byte records.
     records=[]
     for k in range(3):
         off=SRO_OFF+44*k
