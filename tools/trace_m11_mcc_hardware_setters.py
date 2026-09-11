@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
+import struct
 from pathlib import Path
 
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_LITTLE_ENDIAN
@@ -75,6 +76,35 @@ def md(detail=False):
     return c
 
 
+def arm_mov_imm(word: int, kind: str) -> tuple[int, int] | None:
+    # ARM A1 MOVW/MOVT: imm16 = imm4:imm12, Rd = bits 15:12.
+    tag = word & 0x0FF00000
+    want = 0x03000000 if kind == "movw" else 0x03400000
+    if tag != want:
+        return None
+    rd = (word >> 12) & 0xF
+    imm16 = (((word >> 16) & 0xF) << 12) | (word & 0xFFF)
+    return rd, imm16
+
+
+def find_base_hits(data: bytes) -> list[int]:
+    hits = []
+    stop = min(HI, len(data))
+    for p in range(LO, stop - 4, 4):
+        w = struct.unpack_from("<I", data, p)[0]
+        dec = arm_mov_imm(w, "movw")
+        if dec is None or dec[1] != 0x1224:
+            continue
+        rd = dec[0]
+        for q in range(p + 4, min(p + 32, stop), 4):
+            w2 = struct.unpack_from("<I", data, q)[0]
+            dec2 = arm_mov_imm(w2, "movt")
+            if dec2 is not None and dec2 == (rd, 0x4320):
+                hits.append(p)
+                break
+    return hits
+
+
 def find_function_window(data: bytes, hit: int) -> tuple[int, int]:
     start = max(LO, hit - 0x6000)
     stop = min(HI, hit + 0x10000)
@@ -128,18 +158,7 @@ def main() -> None:
     if digest != EXPECTED_SHA:
         raise ValueError(f"unexpected unpacked SHA-256 {digest}")
 
-    code = data[LO:HI]
-    lite = list(md(False).disasm(code, LO))
-    hits = []
-    for i, ins in enumerate(lite):
-        if ins.mnemonic != "movw" or "#0x1224" not in ins.op_str:
-            continue
-        reg = ins.op_str.split(",", 1)[0].strip()
-        for nxt in lite[i+1:i+8]:
-            if nxt.mnemonic == "movt" and nxt.op_str.startswith(reg + ",") and "#0x4320" in nxt.op_str:
-                hits.append(ins.address)
-                break
-
+    hits = find_base_hits(data)
     windows = {}
     for h in hits:
         fn, end = find_function_window(data, h)
@@ -163,13 +182,12 @@ def main() -> None:
         bank_score = 0
         if 0x1000 in addvals:
             bank_score += 100
-        # Known neighboring banks provide useful negative/positive context.
         if 0x4000 in addvals:
-            bank_score += 5  # common R2Y block, not MCC by itself
+            bank_score += 5
         if 0x2000 in addvals:
-            bank_score -= 15 # downstream post-MCC family seen in prior trace
+            bank_score -= 15
         if 0x5000 in addvals:
-            bank_score -= 5  # retained as a diagnostic after address correction
+            bank_score -= 5
 
         lm = []
         for addr, d, mn, ops in disps:
