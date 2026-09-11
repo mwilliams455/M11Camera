@@ -19,7 +19,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/** Controlled Xiaomi DNG -> M11 Standard B2RWBPLACE1A placement experiment. */
+/** Controlled Xiaomi DNG -> M11 Standard COLORRESTORE1A + ORIENTFIX1A experiment. */
 public final class M11RenderWorkflow {
     private M11RenderWorkflow() {}
 
@@ -79,15 +79,17 @@ public final class M11RenderWorkflow {
                     pfd.getFd(), cameraToM11, meta.asShotNeutral, asset.tables);
         }
 
-        Bitmap rawBitmap = nativeResult.bitmap;
-        Bitmap oriented = applyOrientation(rawBitmap, orientation);
-        if (oriented != rawBitmap) rawBitmap.recycle();
+        // LibRaw already owns TIFF orientation in the processed image.  The
+        // previous experiment rotated Orientation=6 a second time in Java,
+        // turning the correct 3072x4096 native result back into 4096x3072.
+        // ORIENTFIX1A therefore saves the native bitmap exactly as returned.
+        Bitmap oriented = nativeResult.bitmap;
 
         String stem = "IMG_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) +
-                "_M11_B2RWBPLACE1A";
+                "_M11_COLORRESTORE1A_ORIENTFIX1A";
         JSONObject diagnostics = new JSONObject();
-        diagnostics.put("schema", "m11camera.render1h.b2rwbplace1a.device.v1");
-        diagnostics.put("candidate", "B2RWBPLACE1A");
+        diagnostics.put("schema", "m11camera.render1h.colorrestore1a.orientfix1a.device.v1");
+        diagnostics.put("candidate", "COLORRESTORE1A_ORIENTFIX1A");
         diagnostics.put("sourceUri", sourceUri.toString());
         diagnostics.put("sourceDngSha256", sourceHash);
         diagnostics.put("sourceMake", String.valueOf(meta.make));
@@ -95,6 +97,8 @@ public final class M11RenderWorkflow {
         diagnostics.put("sourceUniqueCameraModel", String.valueOf(meta.uniqueCameraModel));
         diagnostics.put("sourceRawSize", meta.imageWidth + "x" + meta.imageHeight);
         diagnostics.put("dngOrientation", orientation);
+        diagnostics.put("orientationOwner", "LibRaw");
+        diagnostics.put("javaOrientationApplied", false);
         diagnostics.put("iso", iso.iso);
         diagnostics.put("isoSource", iso.sourceName());
         diagnostics.put("cc1BandIndex", asset.metadata.selectedCc1BandIndex);
@@ -115,6 +119,10 @@ public final class M11RenderWorkflow {
         diagnostics.put("cameraToM11ReferenceBaseline", jsonArray(cameraToM11));
         diagnostics.put("mode", "Standard");
         diagnostics.put("bayerWbPlacementExperiment", true);
+        diagnostics.put("colorRestoreExperiment", true);
+        diagnostics.put("colorRestoreGain", 1.30);
+        diagnostics.put("colorRestoreFirmwareDerived", false);
+        diagnostics.put("colorRestoreLuma", "firmware 4899/9617/1868 over 16384");
         diagnostics.put("leicaRendererTablesChanged", false);
         diagnostics.put("thirdSroApplied", false);
         diagnostics.put("hdr", false);
@@ -136,17 +144,17 @@ public final class M11RenderWorkflow {
             oriented.recycle();
         }
 
-        return "M11 B2RWBPLACE1A Standard complete\n" +
+        return "M11 COLORRESTORE1A ORIENTFIX1A complete\n" +
                 "sourceSha256=" + sourceHash + "\n" +
                 "ISO=" + iso.iso + " / CC1 band=" + asset.metadata.selectedCc1BandIndex +
                 " [" + band.lowerInclusive + "," + band.upperExclusive + ")\n" +
                 "firmwareAssetSha256=" + assetFileHash + "\n" +
                 String.format(Locale.US, "sourceInterpolationFactor=%.14f\n", source.interpolationFactor) +
-                "orientation=" + orientation + " -> " + diagnostics.getInt("outputWidth") + "x" + diagnostics.getInt("outputHeight") + "\n" +
+                "orientation=" + orientation + " owned by LibRaw -> " + diagnostics.getInt("outputWidth") + "x" + diagnostics.getInt("outputHeight") + "\n" +
                 "PNG=" + saved.png + "\n" +
                 "JPEG=" + saved.jpeg + "\n" +
                 "JSON=" + saved.diagnostics + "\n\n" +
-                "Experiment only: AsShotNeutral WB is moved before AHD and algebraically cancelled from the downstream camera-to-M11 matrix. All Leica RENDER1H tables remain unchanged.";
+                "Diagnostic only: B2R WB placement retained, Cat42 retained, then 1.30x luma-preserving chroma restoration is applied after RENDER1H. Java orientation is disabled because LibRaw already owns orientation.";
     }
 
     private static JSONArray jsonArray(double[] values) throws Exception {
@@ -173,6 +181,7 @@ public final class M11RenderWorkflow {
         return obj;
     }
 
+    // Retained only as a regression reference; ORIENTFIX1A must not call it.
     private static Bitmap applyOrientation(Bitmap source, int orientation) {
         if (orientation == 1) return source;
         Matrix matrix = new Matrix();
