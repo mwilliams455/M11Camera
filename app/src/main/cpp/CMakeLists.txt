@@ -26,16 +26,16 @@ find_library(M11_Z_LIB z REQUIRED)
 find_library(M11_JNIGRAPHICS_LIB jnigraphics REQUIRED)
 
 # The original identify, synthetic parity, REALRAW probe and REALRAW1C export
-# paths retain their existing boundaries.  RENDER1A is a new explicitly gated
-# translation unit: it may unpack/AHD only after the same narrow real-Xiaomi
-# decoder identity gate and may invoke the frozen M11 renderer only with tables
-# already accepted by the Java canonical-asset loader.
+# paths retain their existing boundaries.  RENDER1A/RENDER1H remains intact.
+# B2RWBPLACE1A is additive and exists only on the experiment branch so the
+# validated baseline JNI entry remains available for controlled A/B work.
 add_library(m11rawjni SHARED
     m11_raw_jni.cpp
     m11_raw_selftest_jni.cpp
     m11_realraw_probe_jni.cpp
     m11_realraw_export_jni.cpp
     m11_render_jni.cpp
+    m11_render_b2rwb_jni.cpp
 )
 target_compile_features(m11rawjni PRIVATE cxx_std_17)
 target_compile_options(m11rawjni PRIVATE -fvisibility=hidden)
