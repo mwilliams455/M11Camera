@@ -19,6 +19,26 @@ def branch_target(p,w):
  if imm&0x800000: imm-=1<<24
  return (p+8+(imm<<2))&0xffffffff
 
+def arm_mov_imm16(w, top):
+ mask=0x03400000 if top else 0x03000000
+ if (w & 0x0ff00000)!=mask: return None
+ imm=((w>>4)&0xf000)|(w&0xfff)
+ rd=(w>>12)&0xf
+ return rd,imm
+
+def target_mov_pairs_raw(d,want):
+ lo=want&0xffff; hi=(want>>16)&0xffff; out=[]
+ for p in range(0,len(d)-32,4):
+  q=arm_mov_imm16(u32(d,p),False)
+  if q is None or q[1]!=lo: continue
+  rd=q[0]
+  for r in range(p+4,min(p+32,len(d)-3),4):
+   t=arm_mov_imm16(u32(d,r),True)
+   if t is not None and t[0]==rd:
+    if t[1]==hi: out.append((p,r,f'r{rd}',want))
+    break
+ return out
+
 def mov_pairs(d,lo,hi,want=None):
  ins=dis(d,lo,hi); out=[]
  for i,x in enumerate(ins):
@@ -71,7 +91,7 @@ def main():
  ap=argparse.ArgumentParser(); ap.add_argument('unpacked',type=Path); ap.add_argument('--output',type=Path,required=True); a=ap.parse_args()
  d=a.unpacked.read_bytes(); h=hashlib.sha256(d).hexdigest()
  if h!=EXPECTED: raise ValueError(h)
- hits=mov_pairs(d,0,len(d),TARGET_RUNTIME)
+ hits=target_mov_pairs_raw(d,TARGET_RUNTIME)
  lines=['# M11-P MCC RDMA multi-axis entry trace','',f'- unpacked SHA-256: `{h}`',f'- target firmware string file offset: `0x{TARGET_FILE:08X}`',f'- relocated runtime pointer: `0x{TARGET_RUNTIME:08X}`',f'- MOVW/MOVT string-pointer constructions: `{[(hex(x),hex(y),r) for x,y,r,_ in hits]}`','']
  seen=set()
  for x,y,reg,v in hits:
