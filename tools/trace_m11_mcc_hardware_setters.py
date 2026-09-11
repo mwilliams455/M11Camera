@@ -3,11 +3,12 @@
 
 Primary anchors:
 * per-pipe register-base table: 0x43201224 (already closed by YC/MCCSL traces)
-* F_R2Y bank selection in Leica: +0x4000
-* public Milbeaut F_R2Y.MCC begins at F_R2Y +0x1000
-  => expected Leica MCC register bank is approximately perPipeBase +0x5000.
+* Leica MCCSL writer selects the common R2Y block with perPipeBase +0x4000
+* public Milbeaut R2YMODE is at 0xC094, placing that common block at 0xC000
+* public Milbeaut MCC begins at 0x9000
+  => with the same per-pipe origin (0x8000), MCC is perPipeBase +0x1000.
 
-The scan ranks functions that reference the per-pipe base and select +0x5000,
+The scan ranks functions that reference the per-pipe base and select +0x1000,
 then summarizes memory displacements against public MCC register landmarks.
 No renderer arithmetic is inferred here.
 """
@@ -75,8 +76,6 @@ def md(detail=False):
 
 
 def find_function_window(data: bytes, hit: int) -> tuple[int, int]:
-    # Disassemble a bounded region around the base-reference hit and choose the
-    # latest conventional ARM push-with-lr prologue before it.
     start = max(LO, hit - 0x6000)
     stop = min(HI, hit + 0x10000)
     ins = list(md(False).disasm(data[start:stop], start))
@@ -129,8 +128,6 @@ def main() -> None:
     if digest != EXPECTED_SHA:
         raise ValueError(f"unexpected unpacked SHA-256 {digest}")
 
-    # First pass: cheap disassembly, looking for the already-pinned per-pipe
-    # base table constant 0x43201224 (movw 0x1224 + movt 0x4320 nearby).
     code = data[LO:HI]
     lite = list(md(False).disasm(code, LO))
     hits = []
@@ -163,16 +160,16 @@ def main() -> None:
                     disps.append((x.address, d, x.mnemonic, x.op_str))
 
         addvals = {v for _, _, v, _ in adds}
-        # MCC bank selection can compile as +0x5000, or +0x4000 then +0x1000.
         bank_score = 0
-        if 0x5000 in addvals:
-            bank_score += 80
-        if 0x4000 in addvals and 0x1000 in addvals:
-            bank_score += 70
+        if 0x1000 in addvals:
+            bank_score += 100
+        # Known neighboring banks provide useful negative/positive context.
         if 0x4000 in addvals:
-            bank_score += 5
+            bank_score += 5  # common R2Y block, not MCC by itself
         if 0x2000 in addvals:
-            bank_score -= 10
+            bank_score -= 15 # downstream post-MCC family seen in prior trace
+        if 0x5000 in addvals:
+            bank_score -= 5  # retained as a diagnostic after address correction
 
         lm = []
         for addr, d, mn, ops in disps:
@@ -192,7 +189,7 @@ def main() -> None:
         f"- code range: `0x{LO:08x}..0x{HI:08x}`",
         f"- per-pipe base references found: `{len(hits)}`",
         f"- unique candidate functions: `{len(rows)}`",
-        "- target bank: `perPipeBase + 0x5000` (F_R2Y +0x1000 MCC)",
+        "- address closure: Leica common R2Y `+0x4000` == public `0xC000`; public MCC `0x9000` => target bank `perPipeBase +0x1000`",
         "",
         "## Ranked candidates",
         "",
@@ -221,7 +218,7 @@ def main() -> None:
             lines.append(f"- `0x{a0:08x}` `{mn} {ops}` -> {name} `{delta:+#x}`")
         lines += ["", "### Base/bank instruction excerpts", "", "```asm"]
         for x in ins:
-            if ("#0x1224" in x.op_str or "#0x4320" in x.op_str or "#0x5000" in x.op_str or "#0x4000" in x.op_str or "#0x1000" in x.op_str):
+            if ("#0x1224" in x.op_str or "#0x4320" in x.op_str or "#0x1000" in x.op_str or "#0x2000" in x.op_str or "#0x4000" in x.op_str or "#0x5000" in x.op_str):
                 lines.append(f"0x{x.address:08x}: {x.mnemonic} {x.op_str}")
         lines += ["```"]
 
