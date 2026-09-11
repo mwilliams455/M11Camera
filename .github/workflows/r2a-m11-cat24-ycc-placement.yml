@@ -5,6 +5,7 @@ on:
     branches: [work/render1h-cat42yq3a-placement1a]
     paths:
       - 'tools/trace_m11_cat24_ycc_placement.py'
+      - 'tools/trace_m11_cat24_ycc_caller.py'
       - '.github/workflows/r2a-m11-cat24-ycc-placement.yml'
       - 'tools/decompress_m11.py'
   workflow_dispatch:
@@ -83,6 +84,14 @@ jobs:
           python tools/trace_m11_cat24_ycc_placement.py /tmp/M11P.bin \
             --output /tmp/ycc-placement/cat24_ycc_vs_cat42_csp_placement.md
           cat /tmp/ycc-placement/cat24_ycc_vs_cat42_csp_placement.md
+
+      - name: Trace pinned Category-24 resource to YC setter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/trace_m11_cat24_ycc_caller.py /tmp/M11P.bin \
+            --output /tmp/ycc-placement/cat24_ycc_caller_resource.md
+          cat /tmp/ycc-placement/cat24_ycc_caller_resource.md
 
       - name: Upload derived trace only
         if: always()
