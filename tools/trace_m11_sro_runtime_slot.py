@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, hashlib, struct
 from pathlib import Path
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_ARM, CS_MODE_LITTLE_ENDIAN
-from capstone.arm import ARM_OP_MEM, ARM_OP_REG
+from capstone.arm import ARM_OP_MEM
 from extract_m11p_forensics import EXPECTED_UNPACKED_SHA
 
 START=0x01000000; END=0x02000000
@@ -57,6 +57,9 @@ def dis(md,code,lo,hi):
     lo=max(START,lo&~3);hi=min(END,(hi+3)&~3)
     return list(md.disasm(code[lo-START:hi-START],lo))
 
+def raw_reg_name(rd):
+    return ('sp' if rd==13 else 'lr' if rd==14 else 'pc' if rd==15 else f'r{rd}')
+
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('unpacked',type=Path);ap.add_argument('--output',type=Path,required=True);a=ap.parse_args()
     whole=a.unpacked.read_bytes();h=hashlib.sha256(whole).hexdigest()
@@ -67,11 +70,11 @@ def main():
     slot_funcs={}
     for lo,hi,rd in refs:
         ins=dis(md,code,lo-0x60,hi+0x160)
-        hits=[]
+        hits=[]; wanted=raw_reg_name(rd)
         for x in ins:
             if x.id==0: continue
             for op in x.operands:
-                if op.type==ARM_OP_MEM and op.mem.base==rd and op.mem.disp==SRO_SLOT:
+                if op.type==ARM_OP_MEM and md.reg_name(op.mem.base)==wanted and op.mem.disp==SRO_SLOT:
                     hits.append(x)
         if not hits:continue
         e=prologue(code,lo);slot_funcs.setdefault(e,[]).append((lo,hi,rd,hits,ins))
@@ -79,7 +82,7 @@ def main():
     for e,rows in sorted(slot_funcs.items()):
         L += [f'## slot-access function `0x{e:08X}`','']
         for lo,hi,rd,hits,ins in rows:
-            L += [f'- base ref: `0x{lo:08X}` via r{rd}',f'- slot ops: `{[fmt(x) for x in hits]}`','```asm']+[fmt(x) for x in ins]+['```','']
+            L += [f'- base ref: `0x{lo:08X}` via {raw_reg_name(rd)}',f'- slot ops: `{[fmt(x) for x in hits]}`','```asm']+[fmt(x) for x in ins]+['```','']
         cs=callers(code,e)
         L += [f'- direct BL callers: `{[hex(x) for x in cs]}`','']
         for c in cs[:20]:
