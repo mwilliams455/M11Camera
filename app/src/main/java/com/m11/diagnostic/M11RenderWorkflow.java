@@ -19,7 +19,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/** End-to-end controlled Xiaomi DNG -> firmware-gated M11 Standard RENDER1A action. */
+/** Controlled Xiaomi DNG -> M11 Standard B2RWBPLACE1A placement experiment. */
 public final class M11RenderWorkflow {
     private M11RenderWorkflow() {}
 
@@ -45,6 +45,9 @@ public final class M11RenderWorkflow {
         }
         if (!meta.sourceTransformReady()) throw new IOException("required Xiaomi dual-illuminant DNG source tags are incomplete");
         if (!iso.present()) throw new IOException("DNG ISO is unavailable; exact CC1 band selection is required");
+        if (meta.asShotNeutral == null || meta.asShotNeutral.length != 3) {
+            throw new IOException("AsShotNeutral is required for B2RWBPLACE1A");
+        }
 
         byte[] assetBytes = readAsset(activity, ASSET_NAME);
         if (assetBytes.length != ASSET_SIZE) throw new IOException("embedded M11 asset size mismatch");
@@ -72,16 +75,19 @@ public final class M11RenderWorkflow {
         M11RenderBridge.Result nativeResult;
         try (ParcelFileDescriptor pfd = activity.getContentResolver().openFileDescriptor(sourceUri, "r")) {
             if (pfd == null) throw new IOException("content provider returned null render descriptor");
-            nativeResult = M11RenderBridge.renderStandardFd(pfd.getFd(), cameraToM11, asset.tables);
+            nativeResult = M11RenderBridge.renderStandardB2rWbPlacementFd(
+                    pfd.getFd(), cameraToM11, meta.asShotNeutral, asset.tables);
         }
 
         Bitmap rawBitmap = nativeResult.bitmap;
         Bitmap oriented = applyOrientation(rawBitmap, orientation);
         if (oriented != rawBitmap) rawBitmap.recycle();
 
-        String stem = "IMG_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + "_M11_STANDARD";
+        String stem = "IMG_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) +
+                "_M11_B2RWBPLACE1A";
         JSONObject diagnostics = new JSONObject();
-        diagnostics.put("schema", "m11camera.render1a.device.v1");
+        diagnostics.put("schema", "m11camera.render1h.b2rwbplace1a.device.v1");
+        diagnostics.put("candidate", "B2RWBPLACE1A");
         diagnostics.put("sourceUri", sourceUri.toString());
         diagnostics.put("sourceDngSha256", sourceHash);
         diagnostics.put("sourceMake", String.valueOf(meta.make));
@@ -104,16 +110,17 @@ public final class M11RenderWorkflow {
         diagnostics.put("canonicalSourceSha256", sourceHashes);
         diagnostics.put("sourceInterpolationFactor", source.interpolationFactor);
         diagnostics.put("referenceNeutral", jsonArray(source.referenceNeutral));
+        diagnostics.put("asShotNeutral", jsonArray(meta.asShotNeutral));
         diagnostics.put("cameraToXYZD50", jsonArray(source.cameraToXyzD50));
-        diagnostics.put("cameraToM11Reference", jsonArray(cameraToM11));
+        diagnostics.put("cameraToM11ReferenceBaseline", jsonArray(cameraToM11));
         diagnostics.put("mode", "Standard");
+        diagnostics.put("bayerWbPlacementExperiment", true);
+        diagnostics.put("leicaRendererTablesChanged", false);
         diagnostics.put("thirdSroApplied", false);
         diagnostics.put("hdr", false);
         diagnostics.put("localToneMapping", false);
-        diagnostics.put("additionalDownstreamSourceWB", false);
         diagnostics.put("extraOutputOetf", false);
         diagnostics.put("rendererMathChangedForHighlightIssue", false);
-        diagnostics.put("knownResearchBoundary", "Category42 full 44-byte consumer and highlight-range/clamp placement remain under firmware investigation");
         diagnostics.put("native", parseNativeDiagnostics(nativeResult.diagnostics));
         diagnostics.put("outputWidth", oriented.getWidth());
         diagnostics.put("outputHeight", oriented.getHeight());
@@ -129,7 +136,7 @@ public final class M11RenderWorkflow {
             oriented.recycle();
         }
 
-        return "M11 RENDER1A Standard complete\n" +
+        return "M11 B2RWBPLACE1A Standard complete\n" +
                 "sourceSha256=" + sourceHash + "\n" +
                 "ISO=" + iso.iso + " / CC1 band=" + asset.metadata.selectedCc1BandIndex +
                 " [" + band.lowerInclusive + "," + band.upperExclusive + ")\n" +
@@ -139,7 +146,7 @@ public final class M11RenderWorkflow {
                 "PNG=" + saved.png + "\n" +
                 "JPEG=" + saved.jpeg + "\n" +
                 "JSON=" + saved.diagnostics + "\n\n" +
-                "Baseline renderer preserved: no HDR, no local tone mapping, no extra WB/OETF, third SRO inactive, no highlight workaround.";
+                "Experiment only: AsShotNeutral WB is moved before AHD and algebraically cancelled from the downstream camera-to-M11 matrix. All Leica RENDER1H tables remain unchanged.";
     }
 
     private static JSONArray jsonArray(double[] values) throws Exception {
