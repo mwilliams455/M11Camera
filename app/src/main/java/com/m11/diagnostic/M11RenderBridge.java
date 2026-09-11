@@ -3,17 +3,8 @@ package com.m11.diagnostic;
 import android.graphics.Bitmap;
 
 /**
- * RENDER1A bridge for a controlled, offline Xiaomi-DNG -> M11 Standard render.
- *
- * This class deliberately does not load firmware assets itself.  Callers must
- * first pass the canonical binary through {@link M11ReferenceAssetLoader}; the
- * loader is the single provenance/hash gate for firmware-derived tables.
- * Likewise, callers must derive cameraToM11Reference from DNG metadata through
- * M11SourceAdapterCore + M11ReferenceBasisCore.
- *
- * The native side reuses the narrow REALRAW1C Xiaomi/LibRaw decoder gate, uses
- * the frozen rawpy 0.27.1/LibRaw 0.22.1 AHD parameters, renders directly into
- * an Android RGBA_8888 Bitmap, and never applies the unresolved third SRO.
+ * Native bridge for the validated M11 Standard renderer plus isolated research
+ * candidates. Firmware assets remain provenance-gated by the caller.
  */
 public final class M11RenderBridge {
     static {
@@ -36,7 +27,47 @@ public final class M11RenderBridge {
             int fd,
             double[] cameraToM11Reference,
             M11ReferenceRendererCore.Tables tables) {
-        if (fd < 0) throw new IllegalArgumentException("fd must be valid");
+        double[] toneFlat = validateAndFlatten(cameraToM11Reference, tables);
+        Object[] nativeResult = nativeRenderRealXiaomiStandardFd(
+                fd,
+                cameraToM11Reference.clone(),
+                tables.cc0.clone(),
+                tables.cc1.clone(),
+                tables.toneX.clone(),
+                toneFlat,
+                tables.gammaX.clone(),
+                tables.gammaY.clone());
+        return decodeResult(nativeResult, "RENDER1H");
+    }
+
+    public static Result renderStandardB2rWbPlacementFd(
+            int fd,
+            double[] cameraToM11Reference,
+            double[] asShotNeutral,
+            M11ReferenceRendererCore.Tables tables) {
+        double[] toneFlat = validateAndFlatten(cameraToM11Reference, tables);
+        requireLength(asShotNeutral, 3, "AsShotNeutral");
+        for (double value : asShotNeutral) {
+            if (!Double.isFinite(value) || value <= 0.0) {
+                throw new IllegalArgumentException("AsShotNeutral must be finite and positive");
+            }
+        }
+        Object[] nativeResult = nativeRenderRealXiaomiStandardB2rWbPlacementFd(
+                fd,
+                cameraToM11Reference.clone(),
+                asShotNeutral.clone(),
+                tables.cc0.clone(),
+                tables.cc1.clone(),
+                tables.toneX.clone(),
+                toneFlat,
+                tables.gammaX.clone(),
+                tables.gammaY.clone());
+        return decodeResult(nativeResult, "B2RWBPLACE1A");
+    }
+
+    private static double[] validateAndFlatten(
+            double[] cameraToM11Reference,
+            M11ReferenceRendererCore.Tables tables) {
         if (cameraToM11Reference == null || cameraToM11Reference.length != 9) {
             throw new IllegalArgumentException("cameraToM11Reference must be 3x3 row-major");
         }
@@ -54,19 +85,13 @@ public final class M11RenderBridge {
         }
         requireLength(tables.gammaX, 4096, "gammaX");
         requireLength(tables.gammaY, 4096, "gammaY");
+        return toneFlat;
+    }
 
-        Object[] nativeResult = nativeRenderRealXiaomiStandardFd(
-                fd,
-                cameraToM11Reference.clone(),
-                tables.cc0.clone(),
-                tables.cc1.clone(),
-                tables.toneX.clone(),
-                toneFlat,
-                tables.gammaX.clone(),
-                tables.gammaY.clone());
+    private static Result decodeResult(Object[] nativeResult, String label) {
         if (nativeResult == null || nativeResult.length != 2 ||
                 !(nativeResult[0] instanceof Bitmap) || !(nativeResult[1] instanceof String)) {
-            throw new IllegalStateException("RENDER1A native result contract mismatch");
+            throw new IllegalStateException(label + " native result contract mismatch");
         }
         return new Result((Bitmap) nativeResult[0], (String) nativeResult[1]);
     }
@@ -80,6 +105,17 @@ public final class M11RenderBridge {
     private static native Object[] nativeRenderRealXiaomiStandardFd(
             int fd,
             double[] cameraToM11Reference,
+            double[] cc0,
+            double[] cc1,
+            double[] toneX,
+            double[] toneCurvesFlat,
+            double[] gammaX,
+            double[] gammaY);
+
+    private static native Object[] nativeRenderRealXiaomiStandardB2rWbPlacementFd(
+            int fd,
+            double[] cameraToM11Reference,
+            double[] asShotNeutral,
             double[] cc0,
             double[] cc1,
             double[] toneX,
