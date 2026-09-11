@@ -70,7 +70,7 @@ def ascii_at(d,p,n=160):
 def fmt(x): return f'0x{x.address:08X}: {x.mnemonic} {x.op_str}'.rstrip()
 def disasm_window(md,d,addr,before=0x80,after=0x90):
     lo=max(START,(addr-before)&~3); hi=min(END,(addr+after+3)&~3)
-    return list(md.disasm(d[lo:hi],lo))
+    return list(md.disasm(d[lo-START:hi-START],lo))
 
 def strings_near(ins,d):
     rows=[]; seen=set()
@@ -131,7 +131,6 @@ def main():
         all_strings=[]; seen_s=set()
         for addr,why in rows:
             ins=disasm_window(md,d,addr)
-            hit=next((x for x in ins if x.address==addr),None)
             L += [f'### candidate `0x{addr:08X}`',f'- match: {why}','```asm']+[fmt(x) for x in ins]+['```','']
             for s in strings_near(ins,whole):
                 if s not in seen_s: seen_s.add(s); all_strings.append(s)
