@@ -7,6 +7,10 @@ Known wrapper family at 0x0172EC18 requests categories:
 This report correlates those R2YS payload sizes/dependencies with the wrapper's
 actual call sequence and low-level 0x01Bxxxxx consumers.  It does not infer
 photographic arithmetic from category numbering alone.
+
+Re-run after primary-firmware closure of Im_R2Y_Ctrl_Multi_Axis at 0x01B2D324
+and the complete F_R2Y.MCC hardware footprint, so any low-level overlap can now
+be judged against a concrete MCC target rather than category naming.
 """
 from __future__ import annotations
 
