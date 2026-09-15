@@ -11,6 +11,8 @@ RANGES=[
  ('CAL_BIN_LOADER',0x016E9678,0x016E9EDC),
  ('CAL_INIT',0x016EAF60,0x016EB060),
 ]
+TEMP_TABLE_RUNTIME=0x42224B38
+RUNTIME_DELTA=0x3FAA87D0
 
 def fmt(i): return f'0x{i.address:08X}: {i.mnemonic} {i.op_str}'.rstrip()
 
@@ -47,6 +49,17 @@ def main():
             for ia,addr,raw,val in lits:
                 L.append(f'- instr `{ia:#010x}` -> `{addr:#010x}` raw `{raw}` value `{val!r}`')
             L += ['']
+
+    # Robertson/Wyszecki-Stiles table: 31 entries x 4 doubles, 32-byte stride.
+    table_off=TEMP_TABLE_RUNTIME-RUNTIME_DELTA
+    L += ['## Firmware temperature table','',
+          f'- runtime `{TEMP_TABLE_RUNTIME:#010x}` -> file `{table_off:#010x}`',
+          '- layout: 31 rows of four doubles `(r, u, v, t)`','']
+    for idx in range(31):
+        row=struct.unpack_from('<4d',d,table_off+idx*32)
+        L.append(f'- {idx:02d}: `{row[0]:.12g}, {row[1]:.12g}, {row[2]:.12g}, {row[3]:.12g}`')
+    L += ['']
+
     # Exact static COLOR132 payload for side-by-side arithmetic checks.
     off=0x002C9A98
     vals=struct.unpack_from('<33i',d,off)
