@@ -27,17 +27,10 @@ def main():
   e=nxt(d,t,0x800)
   L += [f'## A32 `0x{t:08X}` to next push `0x{e:08X}`','```asm']+[fmt(i) for i in a32.disasm(d[t:e],t)]+['```','']
  L += [f'## Thumb rounding target `0x{THUMB_TARGET:08X}`','',
-       '- Called with A32 `BLX`, therefore decoded in Thumb mode.','```asm']
- # Stop at obvious Thumb return after enough bytes, but dump bounded context as well.
- ins=list(th.disasm(d[THUMB_TARGET:THUMB_TARGET+0x300],THUMB_TARGET))
- for i in ins:
-  L.append(fmt(i))
-  if i.address>THUMB_TARGET+8 and i.mnemonic in ('bx','pop') and ('lr' in i.op_str or 'pc' in i.op_str):
-   break
- L += ['```','']
- # Raw halfwords around target to make mode/entry auditable.
+       '- Called with A32 `BLX`, therefore decoded in Thumb mode. Full bounded body follows so all magnitude branches are visible.','```asm']
+ L += [fmt(i) for i in th.disasm(d[THUMB_TARGET:THUMB_TARGET+0xA0],THUMB_TARGET)]+['```','']
  L += ['## Raw target bytes','```text']
- for p in range(THUMB_TARGET,THUMB_TARGET+0x40,16):
+ for p in range(THUMB_TARGET,THUMB_TARGET+0xA0,16):
   b=d[p:p+16];L.append(f'{p:08X}  '+b.hex(' '))
  L += ['```','']
  a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text('\n'.join(L)+'\n');print(a.output)
