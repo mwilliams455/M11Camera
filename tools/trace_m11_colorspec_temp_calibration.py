@@ -13,6 +13,7 @@ RANGES=[
 ]
 TEMP_TABLE_RUNTIME=0x42224B38
 RUNTIME_DELTA=0x3FAA87D0
+NEUTRAL_EPS_LITERAL=0x016ED360
 
 def fmt(i): return f'0x{i.address:08X}: {i.mnemonic} {i.op_str}'.rstrip()
 
@@ -36,7 +37,12 @@ def main():
     if h!=EXPECTED: raise SystemExit(h)
     md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN); md.skipdata=True
     L=['# M11 ColorSpec temperature / calibration trace','',f'- SHA256 `{h}`','',
-       '- Goal: close xy->temperature/tint arithmetic and Q-format calibration matrix conversion used by dynamic CC0.','']
+       '- Goal: close xy->temperature/tint arithmetic, NeutralToXY convergence, and Q-format calibration matrix conversion used by dynamic CC0.','']
+    eps_raw=d[NEUTRAL_EPS_LITERAL:NEUTRAL_EPS_LITERAL+8]
+    L += ['## NeutralToXY convergence literal','',
+          f'- `0x016ED25C: vldr d17, [pc, #0xfc]` resolves to file `{NEUTRAL_EPS_LITERAL:#010x}`',
+          f'- raw `{eps_raw.hex()}`',
+          f'- double `{struct.unpack("<d",eps_raw)[0]!r}`','']
     for name,lo,hi in RANGES:
         ins=list(md.disasm(d[lo:hi],lo))
         L += [f'## {name} `{lo:#010x}`..`{hi:#010x}`','```asm']+[fmt(i) for i in ins]+['```','']
@@ -50,7 +56,6 @@ def main():
                 L.append(f'- instr `{ia:#010x}` -> `{addr:#010x}` raw `{raw}` value `{val!r}`')
             L += ['']
 
-    # Robertson/Wyszecki-Stiles table: 31 entries x 4 doubles, 32-byte stride.
     table_off=TEMP_TABLE_RUNTIME-RUNTIME_DELTA
     L += ['## Firmware temperature table','',
           f'- runtime `{TEMP_TABLE_RUNTIME:#010x}` -> file `{table_off:#010x}`',
@@ -60,7 +65,6 @@ def main():
         L.append(f'- {idx:02d}: `{row[0]:.12g}, {row[1]:.12g}, {row[2]:.12g}, {row[3]:.12g}`')
     L += ['']
 
-    # Exact static COLOR132 payload for side-by-side arithmetic checks.
     off=0x002C9A98
     vals=struct.unpack_from('<33i',d,off)
     L += ['## Static COLOR132 / R2Y_CC0_CM payload','',f'- file offset `{off:#010x}`','']
