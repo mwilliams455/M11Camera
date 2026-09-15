@@ -17,7 +17,7 @@ def main():
     for i in range(COUNT):
         vals=struct.unpack_from('<4d',d,off+i*STRIDE)
         rows.append(vals)
-    L=['# M11 ColorSpec isotemperature table','',f'- SHA256 `{h}`',f'- runtime `{RUNTIME:#010x}`',f'- file offset `{off:#010x}`',f'- entries `{COUNT}`,f'- stride `{STRIDE}` bytes','', '```text']
+    L=['# M11 ColorSpec isotemperature table','',f'- SHA256 `{h}`',f'- runtime `{RUNTIME:#010x}`',f'- file offset `{off:#010x}`',f'- entries `{COUNT}`',f'- stride `{STRIDE}` bytes','','```text']
     for i,row in enumerate(rows):
         L.append(f'{i:02d}: '+', '.join(f'{v:.17g}' for v in row))
     L += ['```','']
