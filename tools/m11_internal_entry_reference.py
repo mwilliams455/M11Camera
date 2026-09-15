@@ -49,6 +49,16 @@ class HistoricalEntryComparison:
     direct_k_relative_ev: float
 
 
+@dataclass(frozen=True)
+class SourceEntryComparison:
+    old_camera_to_internal: np.ndarray
+    direct_camera_to_internal: np.ndarray
+    best_scalar_old_to_direct: float
+    max_abs_residual_after_scalar: float
+    rms_residual_after_scalar: float
+    direct_relative_ev: float
+
+
 def xyz_d50_to_internal(xyz) -> np.ndarray:
     values = np.asarray(xyz, dtype=np.float64)
     if values.shape[-1] != 3:
@@ -56,13 +66,17 @@ def xyz_d50_to_internal(xyz) -> np.ndarray:
     return np.einsum("...j,ij->...i", values, PCS_TO_INTERNAL)
 
 
-def camera_to_internal_matrix(camera_to_xyz_d50) -> np.ndarray:
+def _source_matrix(camera_to_xyz_d50) -> np.ndarray:
     matrix = np.asarray(camera_to_xyz_d50, dtype=np.float64)
     if matrix.shape != (3, 3):
         raise ValueError("camera_to_xyz_d50 must be 3x3")
     if not np.all(np.isfinite(matrix)):
         raise ValueError("camera_to_xyz_d50 contains non-finite values")
-    return PCS_TO_INTERNAL @ matrix
+    return matrix
+
+
+def camera_to_internal_matrix(camera_to_xyz_d50) -> np.ndarray:
+    return PCS_TO_INTERNAL @ _source_matrix(camera_to_xyz_d50)
 
 
 def historical_entry_comparison() -> HistoricalEntryComparison:
@@ -78,4 +92,25 @@ def historical_entry_comparison() -> HistoricalEntryComparison:
         max_abs_residual_after_scalar=float(np.max(np.abs(residual))),
         rms_residual_after_scalar=float(np.sqrt(np.mean(residual * residual))),
         direct_k_relative_ev=ev,
+    )
+
+
+def compare_source_entries(camera_to_xyz_d50) -> SourceEntryComparison:
+    """Compare frozen old entry against direct-K for one white-balanced source transform."""
+    source = _source_matrix(camera_to_xyz_d50)
+    old_entry = HISTORICAL_CATEGORY3_CC0 @ reference_basis.xyz_d50_to_m11_a_reference_wb()
+    old_camera_to_internal = old_entry @ source
+    direct_camera_to_internal = PCS_TO_INTERNAL @ source
+    scalar = float(
+        np.sum(old_camera_to_internal * direct_camera_to_internal)
+        / np.sum(direct_camera_to_internal * direct_camera_to_internal)
+    )
+    residual = old_camera_to_internal - scalar * direct_camera_to_internal
+    return SourceEntryComparison(
+        old_camera_to_internal=old_camera_to_internal,
+        direct_camera_to_internal=direct_camera_to_internal,
+        best_scalar_old_to_direct=scalar,
+        max_abs_residual_after_scalar=float(np.max(np.abs(residual))),
+        rms_residual_after_scalar=float(np.sqrt(np.mean(residual * residual))),
+        direct_relative_ev=float(-math.log2(scalar)),
     )
