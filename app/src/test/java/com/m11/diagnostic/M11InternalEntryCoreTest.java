@@ -79,9 +79,9 @@ public final class M11InternalEntryCoreTest {
                 XIAOMI_S, oldPreCc0, HISTORICAL_CC0);
 
         assertEquals(0.9655747553431321, c.bestScalarOldToDirect, 1e-12);
-        assertEquals(0.0505401371, c.directRelativeEv, 1e-10);
-        assertEquals(0.0223847180, c.maxAbsResidualAfterScalar, 2e-8);
-        assertEquals(0.0119669550, c.rmsResidualAfterScalar, 2e-8);
+        assertEquals(0.05054013712227328, c.directRelativeEv, 1e-12);
+        assertEquals(0.022386000803220035, c.maxAbsResidualAfterScalar, 1e-12);
+        assertEquals(0.01196815471382184, c.rmsResidualAfterScalar, 1e-12);
     }
 
     @Test
