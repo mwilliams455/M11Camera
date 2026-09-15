@@ -10,7 +10,7 @@ MATS={
  'ADAPT_BASIS':0x42224598,
  'ADAPT_BASIS_INV':0x422245E0,
 }
-TARGETS=[0x016ED060,0x016ECBEC,0x016EC568,0x016ED544,0x016EE294,0x016EE62C,0x016EE5B4,0x016EEE74,0x016EF35C,0x016EF104,0x016ED670,0x016EDA24,0x016ED8E0,0x016ED644,0x016ED728,0x016F19FC,0x016F18D4,0x016F1888]
+TARGETS=[0x016EBE14,0x016ECB80,0x016ED060,0x016ECBEC,0x016EC568,0x016ED544,0x016EE294,0x016EE62C,0x016EE5B4,0x016EEE74,0x016EF35C,0x016EF104,0x016ED670,0x016EDA24,0x016ED8E0,0x016ED644,0x016ED728,0x016F19FC,0x016F18D4,0x016F1888,0x016F1BE0]
 MAIN_LO=0x016F2380;MAIN_HI=0x016F2720
 START=0x016E0000;END=0x01700000
 def u32(d,a):return struct.unpack_from('<I',d,a)[0] if 0<=a<=len(d)-4 else None
@@ -36,23 +36,25 @@ def main():
  if h!=EXPECTED:raise SystemExit(h)
  md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.skipdata=True
  L=['# M11 ColorSpec dynamic CC0 composition trace','',f'- SHA256 `{h}`','',
-    '- Goal: label exact floating 3x3 operands that produce the matrix quantized at `0x016F2710`, close MapWhiteMatrix direction, and dump Leica adaptation basis/inverse verbatim.','']
+    '- Goal: close the successful dynamic CC0 formula, including dual-illuminant calibration interpolation, Bradford adaptation, inversion, and root +0x08 three-vector provenance.','']
  L += ['## Fixed matrices','']
  for name,rt in MATS.items():
   off,vals=mat(d,rt)
   L += [f'### {name}',f'- runtime `0x{rt:08X}` -> file `0x{off:08X}`',f'- row-major doubles `{vals}`','']
  L += ['## Main dataflow window','```asm']+[fmt(i) for i in md.disasm(d[MAIN_LO:MAIN_HI],MAIN_LO)]+['```','']
+ L += ['## ColorSpec preparation / root input writer `0x016EBE14..0x016EC568`','```asm']+[fmt(i) for i in md.disasm(d[0x016EBE14:0x016EC568],0x016EBE14)]+['```','']
+ L += ['## Calibration interpolation helper `0x016ECB80..0x016ECBEC`','```asm']+[fmt(i) for i in md.disasm(d[0x016ECB80:0x016ECBEC],0x016ECB80)]+['```','']
  L += ['## ColorSpec SetWhite orchestration `0x016ECBEC..0x016ED060`','```asm']+[fmt(i) for i in md.disasm(d[0x016ECBEC:0x016ED060],0x016ECBEC)]+['```','']
- L += ['## MapWhiteMatrix candidate `0x016EC568` complete body','```asm']+[fmt(i) for i in md.disasm(d[0x016EC568:0x016ECB80],0x016EC568)]+['```','']
+ L += ['## MapWhiteMatrix `0x016EC568..0x016ECB80`','```asm']+[fmt(i) for i in md.disasm(d[0x016EC568:0x016ECB80],0x016EC568)]+['```','']
  for lo,hi,name in [
-   (0x016F19FC,0x016F1B10,'white xy -> normalized XYZ helper'),
+   (0x016F19FC,0x016F1BC0,'white xy -> normalized XYZ helper'),
    (0x016F18D4,0x016F19FC,'white-point constant / constructor helpers'),
    (0x016F1888,0x016F18D4,'adjacent reference-white helper')]:
   L += [f'## {name} `0x{lo:08X}..{hi:#010x}`','```asm']+[fmt(i) for i in md.disasm(d[lo:hi],lo)]+['```','']
  seen=set()
  for t in TARGETS:
   f=fs(d,t);e=nxt(d,f,0x2800);key=(f,e)
-  if key in seen or f in (0x016EC568,0x016ECBEC):continue
+  if key in seen or f in (0x016EC568,0x016ECB80,0x016ECBEC):continue
   seen.add(key)
   L += [f'## Helper target `0x{t:08X}` function `0x{f:08X}`','```asm']+[fmt(i) for i in md.disasm(d[f:e],f)]+['```','']
  L += ['## Calibration object raw-reference note','',
