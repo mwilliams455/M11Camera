@@ -1,0 +1,18 @@
+name: R2A M11 ColorSpec CC0 reference
+on:
+  push:
+    branches: [work/render1h-cat42yq3a-placement1a]
+    paths:
+      - 'tools/m11_colorspec_cc0_reference.py'
+      - 'tests/test_m11_colorspec_cc0_reference.py'
+      - '.github/workflows/r2a-m11-colorspec-cc0-reference.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ColorSpec CC0 reference tests
+        run: python -m unittest tests/test_m11_colorspec_cc0_reference.py -v
