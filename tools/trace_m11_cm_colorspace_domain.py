@@ -26,7 +26,7 @@ def main():
     ap=argparse.ArgumentParser();ap.add_argument('unpacked',type=Path);ap.add_argument('--output',type=Path,required=True);a=ap.parse_args()
     d=a.unpacked.read_bytes();h=hashlib.sha256(d).hexdigest()
     if h!=EXPECTED:raise SystemExit(h)
-    md=Cs(CS_ARCH_ARM,CS_MODE_ARM,CS_MODE_LITTLE_ENDIAN);md.detail=True;md.skipdata=True
+    md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.detail=True;md.skipdata=True
     L=['# M11 CM colorspace/domain trace','',f'- SHA256 `{h}`',f'- selector table runtime `0x{TABLE_RT:08X}`, file `0x{TABLE_FILE:08X}`','']
     L+=['## Selector table raw entries (12-byte stride)','']
     entries=[]; ptrs=[]
@@ -46,7 +46,6 @@ def main():
     for p in sorted(set(ptrs)):
         ins=list(md.disasm(d[p:p+0x20],p))
         L += [f'### helper file `0x{p:08X}` runtime `0x{p+DELTA:08X}`','```asm']+[fmt(x) for x in ins]+['```']
-        # helpers are tiny MOVW/MOVT pointer-return stubs; reconstruct target from the immediates.
         lo=hi=None
         for x in ins:
             if x.mnemonic=='movw' and x.op_str.startswith('r3, #'):
