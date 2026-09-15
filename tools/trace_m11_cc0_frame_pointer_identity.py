@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse,hashlib,struct,re
+import argparse,hashlib,struct
 from pathlib import Path
 from capstone import Cs,CS_ARCH_ARM,CS_MODE_ARM,CS_MODE_LITTLE_ENDIAN
 EXPECTED='28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
 START=0x01500000;END=0x01C00000
 FRAME_GLOBAL=0x43433774
-AAA_START=0x016CDE50;AAA_END=0x016CF988
+AAA_STATE_GLOBAL=0x43379928
+AAA_CTOR=0x0178A3A0
+AAA_START=0x016CDE50
 AAA_CM_CALL=0x016CEFE4
 STORE_SITES=[0x01794780,0x01795ADC]
 def u32(d,a):return struct.unpack_from('<I',d,a)[0] if 0<=a<=len(d)-4 else None
@@ -19,6 +21,12 @@ def fs(d,a,window=0x40000):
  for p in range(a&~3,max(START,(a&~3)-window),-4):
   if push(u32(d,p)):return p
  return a&~3
+def next_push(d,a,limit=0x3000):
+ p=(a+4)&~3
+ while p<min(END,a+limit):
+  if push(u32(d,p)):return p
+  p+=4
+ return min(END,a+limit)
 def fmt(i):return f'0x{i.address:08X}: {i.mnemonic} {i.op_str}'.rstrip()
 def decmov(w,kind):
  tag=w&0x0ff00000;want=0x03000000 if kind=='w' else 0x03400000
@@ -36,50 +44,47 @@ def refs(d,target):
     if ((t[1]<<16)|lo)==target:out.append((p,q,rd))
     break
  return out
+def callers(d,target,lo=START,hi=END):
+ return [p for p in range(lo,hi,4) if blt(p,u32(d,p))==target]
 def main():
  ap=argparse.ArgumentParser();ap.add_argument('unpacked',type=Path);ap.add_argument('--output',type=Path,required=True);a=ap.parse_args()
  d=a.unpacked.read_bytes();h=hashlib.sha256(d).hexdigest()
  if h!=EXPECTED:raise SystemExit(h)
  md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.skipdata=True
- ins=list(md.disasm(d[AAA_START:AAA_END],AAA_START));idx={i.address:n for n,i in enumerate(ins)}
- L=['# M11 AAA queued frame destination trace','',f'- SHA256 `{h}`','',
-    '- Goal: resolve the queued message/object chain that yields the CM destination pointer `[state+0xFC]`, then compare it with the still controller current-frame object.','']
- L += ['## Confirmed AAA -> CM handoff','```asm']+[fmt(i) for i in md.disasm(d[0x016CEFC8:0x016CEFF0],0x016CEFC8)]+['```','']
- # Every local message pointer assignment/use.
- needles=['[fp, #-0x30]','[fp, #-0x38]','[fp, #-0x24]']
- for needle in needles:
-  L += [f'## AAA uses of `{needle}`','']
-  seen=set()
-  for i in ins:
-   if needle not in i.op_str:continue
-   n=idx[i.address];lo=max(0,n-14);hi=min(len(ins),n+18)
-   key=(ins[lo].address,ins[hi-1].address)
-   if key in seen:continue
-   seen.add(key)
-   L += [f'### site `0x{i.address:08X}`','```asm']+[fmt(x) for x in ins[lo:hi]]+['```','']
- # Calls in AAA around message acquisition, with targets.
- L += ['## AAA direct BL targets near message-local writes','']
- for i in ins:
-  t=blt(i.address,u32(d,i.address))
-  if t is None:continue
-  n=idx[i.address]
-  text=' | '.join(fmt(x) for x in ins[max(0,n-5):min(len(ins),n+7)])
-  if any(k in text for k in ('#-0x30','#-0x38','#-0x24','#0x1c','#0xfc')):
-   L.append(f'- call `0x{i.address:08X}` -> `0x{t:08X}`: `{text}`')
- # The exact nested object chain before CM.
- L += ['','## Nested object chain immediately preceding CM','```asm']+[fmt(i) for i in md.disasm(d[0x016CE680:0x016CE730],0x016CE680)]+['```','']
- # Scan FRAME_GLOBAL loads followed by a store to +0xFC in same short basic window.
- L += [f'## FRAME_GLOBAL `0x{FRAME_GLOBAL:08X}` load -> struct+0xFC candidates','']
- rr=refs(d,FRAME_GLOBAL);cand=0
+ L=['# M11 AAA state constructor -> current frame closure','',f'- SHA256 `{h}`','',
+    f'- Candidate AAA state object: `0x{AAA_STATE_GLOBAL:08X}`; constructor `0x{AAA_CTOR:08X}` writes callbacks at +0x100/+0x104 and a pointer at +0xFC.','']
+ # Full constructor to identify argument mapping and event behaviour.
+ ce=next_push(d,AAA_CTOR,0x1000)
+ L += [f'## Candidate AAA state constructor `0x{AAA_CTOR:08X}` -> next push `0x{ce:08X}`','```asm']+[fmt(i) for i in md.disasm(d[AAA_CTOR:ce],AAA_CTOR)]+['```','']
+ # Direct callers and register setup, especially r1 which is expected to feed state+0xFC.
+ cs=callers(d,AAA_CTOR)
+ L += [f'## Direct callers of constructor',f'- callers `{[hex(x) for x in cs]}`','']
+ for ca in cs:
+  pf=fs(d,ca);lo=max(pf,ca-0xc0);hi=min(END,ca+0x28)
+  L += [f'### call `0x{ca:08X}` parent `0x{pf:08X}`','```asm']+[fmt(i) for i in md.disasm(d[lo:hi],lo)]+['```','']
+ # Absolute references to candidate state object; look for queue/event packaging and state+0xFC consumers.
+ rr=refs(d,AAA_STATE_GLOBAL)
+ L += [f'## References to candidate state object `0x{AAA_STATE_GLOBAL:08X}`',f'- ref count `{len(rr)}`','']
  for p,q,r in rr:
-  lo=p;hi=min(END,q+0x100);seq=list(md.disasm(d[lo:hi],lo));text=' | '.join(fmt(x) for x in seq)
-  if '#0xfc]' in text or '#0xfc' in text:
-   cand+=1;L += [f'### candidate ref `0x{p:08X}` func `0x{fs(d,p):08X}`','```asm']+[fmt(x) for x in seq]+['```','']
- L += [f'- candidate count `{cand}`','']
- # Current frame producer snippets.
+  f=fs(d,p);lo=max(f,p-0x60);hi=min(END,q+0x90)
+  L += [f'### ref `0x{p:08X}` func `0x{f:08X}`','```asm']+[fmt(i) for i in md.disasm(d[lo:hi],lo)]+['```','']
+ # Side-by-side AAA consumer chain.
+ L += ['## AAA queued consumer -> CM','```asm']+[fmt(i) for i in md.disasm(d[0x016CE0A4:0x016CE0E4],0x016CE0A4)]+[fmt(i) for i in md.disasm(d[0x016CE6C4:0x016CE714],0x016CE6C4)]+[fmt(i) for i in md.disasm(d[0x016CEFD8:0x016CEFE8],0x016CEFD8)]+['```','']
+ # Current frame producers and all constructor calls in their containing still controller.
+ sf=fs(d,STORE_SITES[0]);se=next_push(d,sf,0x10000)
+ L += [f'## Still controller `0x{sf:08X}` constructor-call search','']
+ internal=[p for p in range(sf,se,4) if blt(p,u32(d,p))==AAA_CTOR]
+ L += [f'- calls to AAA constructor inside still controller: `{[hex(x) for x in internal]}`','']
+ for ca in internal:
+  L += [f'### still-controller call `0x{ca:08X}`','```asm']+[fmt(i) for i in md.disasm(d[max(sf,ca-0xa0):ca+0x20],max(sf,ca-0xa0))]+['```','']
  for site in STORE_SITES:
-  L += [f'## Current-frame producer `0x{site:08X}`','```asm']+[fmt(i) for i in md.disasm(d[site-0x60:site+0x70],site-0x60)]+['```','']
- # Disassemble the fallback frame-base allocator/accessor called immediately before +0x240.
- L += ['## Fallback frame-base provider 0x019C80BC','```asm']+[fmt(i) for i in md.disasm(d[0x019C80BC:0x019C81BC],0x019C80BC)]+['```','']
+  L += [f'## Current-frame install `0x{site:08X}`','```asm']+[fmt(i) for i in md.disasm(d[site-0x40:site+0x28],site-0x40)]+['```','']
+ # Any function that references both the state global and FRAME_GLOBAL is highly probative.
+ fr=refs(d,FRAME_GLOBAL)
+ fs_state={fs(d,p) for p,_,_ in rr};fs_frame={fs(d,p) for p,_,_ in fr};both=sorted(fs_state&fs_frame)
+ L += ['## Functions referencing both AAA state global and current-frame global',f'- functions `{[hex(x) for x in both]}`','']
+ for f in both:
+  e=next_push(d,f,0x5000)
+  L += [f'### shared function `0x{f:08X}`','```asm']+[fmt(i) for i in md.disasm(d[f:min(e,f+0x900)],f)]+['```','']
  a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text('\n'.join(L)+'\n');print(a.output)
 if __name__=='__main__':main()
