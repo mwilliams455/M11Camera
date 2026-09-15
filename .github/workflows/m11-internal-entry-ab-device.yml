@@ -1,0 +1,175 @@
+name: M11 internal-entry OLD vs DIRECT_K A/B APK
+
+on:
+  push:
+    branches: [work/render1h-cat42yq3a-placement1a]
+    paths:
+      - '.github/workflows/m11-internal-entry-ab-device.yml'
+      - 'tools/apply_internal_entry_ab_device.py'
+      - 'app/src/main/java/com/m11/diagnostic/M11InternalEntryCore.java'
+      - 'app/src/main/java/com/m11/diagnostic/M11InternalEntryAbWorkflow.java'
+      - 'app/src/test/java/com/m11/diagnostic/M11InternalEntryCoreTest.java'
+  workflow_dispatch:
+
+jobs:
+  build-internal-entry-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+      NDK_VERSION: 27.2.12479018
+      M11_LIBRAW_PATH: ${{ github.workspace }}/work/LibRaw
+      M11_LIBRAW_CMAKE_PATH: ${{ github.workspace }}/work/LibRaw-cmake
+      M11_REFERENCE_ASSET_SHA256: 54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219
+
+    steps:
+      - name: Checkout M11 repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install frozen rawpy parity environment
+        run: python -m pip install --disable-pip-version-check -r requirements/m11_raw_oracle.txt
+
+      - name: Validate tooling and materialize canonical Android asset
+        run: |
+          set -euo pipefail
+          python -m unittest tests.test_materialize_m11_reference_tables -v
+          python -m py_compile \
+            tools/materialize_m11_embedded_asset.py \
+            tools/apply_render1h_cat42yq3a.py \
+            tools/apply_render1h_device_labels.py \
+            tools/apply_internal_entry_ab_device.py
+          python tools/materialize_m11_embedded_asset.py
+          test "$(wc -c < app/src/main/assets/m11_reference_tables_v1.bin)" -eq 23150
+          test "$(sha256sum app/src/main/assets/m11_reference_tables_v1.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+
+      - name: Generate parity and synthetic RAW diagnostic assets
+        run: |
+          set -euo pipefail
+          python tools/validate_m11_raw_oracle_environment.py | tee M11_RAWPY_IDENTITY.json
+          PYTHONPATH=. python tools/generate_m11_android_python_parity_fixture.py --out app/src/test/resources/m11_python_android_parity_v1.b64
+          mkdir -p app/src/main/assets work/rawpy_selftest
+          python tools/generate_m11_synthetic_dng.py --out app/src/main/assets/apk1a_synthetic.dng | tee M11_SYNTHETIC_DNG.txt
+          python tools/dump_m11_rawpy_pixel_parity.py app/src/main/assets/apk1a_synthetic.dng work/rawpy_selftest | tee M11_RAWPY_SELFTEST_DUMP.txt
+          cp work/rawpy_selftest/mosaic_u16le.bin app/src/main/assets/apk1a_expected_mosaic_u16le.bin
+          cp work/rawpy_selftest/ahd_u16le.bin app/src/main/assets/apk1a_expected_ahd_u16le.bin
+
+      - name: Materialize frozen RENDER1H control
+        run: |
+          set -euo pipefail
+          python tools/apply_render1h_cat42yq3a.py | tee M11_RENDER1H_PATCH.txt
+          python tools/apply_render1h_device_labels.py | tee M11_RENDER1H_DEVICE_LABELS.txt
+          grep -q 'schema=m11camera.render1h.cat42yq3a.orient1a.v1' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'config.mode = m11::render::Mode::Standard' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'config.use_cc0 = true' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'config.clamp = false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'additionalDownstreamSourceWB=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'extraOutputOetf=false' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'thirdSroApplied=false' app/src/main/cpp/m11_render_jni.cpp
+          sha256sum app/src/main/cpp/m11_render_jni.cpp | tee M11_NATIVE_BEFORE_AB.sha256
+
+      - name: Apply isolated internal-entry A/B UI overlay
+        run: |
+          set -euo pipefail
+          python tools/apply_internal_entry_ab_device.py | tee M11_INTERNAL_ENTRY_AB_PATCH.txt
+          sha256sum app/src/main/cpp/m11_render_jni.cpp | tee M11_NATIVE_AFTER_AB.sha256
+          cmp M11_NATIVE_BEFORE_AB.sha256 M11_NATIVE_AFTER_AB.sha256
+          grep -q 'REQUEST_INTERNAL_ENTRY_AB = 1106' app/src/main/java/com/m11/diagnostic/MainActivity.java
+          grep -q 'internal-entry OLD vs DIRECT_K A/B' app/src/main/java/com/m11/diagnostic/MainActivity.java
+          grep -q 'M11InternalEntryAbWorkflow.run(this, uri)' app/src/main/java/com/m11/diagnostic/MainActivity.java
+          grep -q 'M11RenderWorkflow.run(this, uri)' app/src/main/java/com/m11/diagnostic/MainActivity.java
+          grep -q 'PCS_TO_INTERNAL' app/src/main/java/com/m11/diagnostic/M11InternalEntryCore.java
+          grep -q 'withIdentityCc0' app/src/main/java/com/m11/diagnostic/M11InternalEntryCore.java
+          grep -q 'nativeRendererModifiedForExperiment", false' app/src/main/java/com/m11/diagnostic/M11InternalEntryAbWorkflow.java
+          grep -q 'm11SensorColorSpecAppliedToXiaomi", false' app/src/main/java/com/m11/diagnostic/M11InternalEntryAbWorkflow.java
+          ! grep -Rni 'InternalEntry' app/src/main/cpp native/m11_renderer
+          git diff -- app/src/main/java/com/m11/diagnostic/MainActivity.java > M11_INTERNAL_ENTRY_AB_UI.patch
+
+      - name: Audit frozen photographic boundaries
+        run: |
+          set -euo pipefail
+          grep -q 'applicationId = "com.m11.diagnostic.render1h"' app/build.gradle.kts
+          grep -q 'ASSET_SHA256 = "54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219"' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'orientationHandledByLibRaw", true' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'javaOrientationApplied", false' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          ! grep -RniE 'LocalLaplacian|local_tone_mapping|hdr_merge|HDRMerge' native/m11_renderer/m11_reference_renderer_core.h app/src/main/cpp/m11_render_jni.cpp
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform, build tools, NDK and CMake
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+
+      - name: Fetch exact LibRaw sources for JNI build
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git "$M11_LIBRAW_PATH"
+          git -C "$M11_LIBRAW_PATH" checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git "$M11_LIBRAW_CMAKE_PATH"
+          git -C "$M11_LIBRAW_CMAKE_PATH" checkout --detach "$LIBRAW_CMAKE_COMMIT"
+
+      - name: Set up Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Run unit tests and build A/B candidate APK
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace 2>&1 | tee M11_INTERNAL_ENTRY_AB_GRADLE.log
+
+      - name: Audit APK contents and canonical asset bytes
+        if: success()
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)
+          test -n "$apk"
+          unzip -l "$apk" | tee M11_INTERNAL_ENTRY_AB_APK_CONTENTS.log
+          grep -q 'lib/arm64-v8a/libm11rawjni.so' M11_INTERNAL_ENTRY_AB_APK_CONTENTS.log
+          grep -q 'assets/m11_reference_tables_v1.bin' M11_INTERNAL_ENTRY_AB_APK_CONTENTS.log
+          unzip -p "$apk" assets/m11_reference_tables_v1.bin > M11_APK_REFERENCE_ASSET.bin
+          test "$(sha256sum M11_APK_REFERENCE_ASSET.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+          sha256sum "$apk" | tee M11_INTERNAL_ENTRY_AB_APK_SHA256.txt
+
+      - name: Upload A/B build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11-INTERNAL-ENTRY-AB-buildlog
+          path: |
+            M11_RENDER1H_PATCH.txt
+            M11_RENDER1H_DEVICE_LABELS.txt
+            M11_INTERNAL_ENTRY_AB_PATCH.txt
+            M11_INTERNAL_ENTRY_AB_UI.patch
+            M11_NATIVE_BEFORE_AB.sha256
+            M11_NATIVE_AFTER_AB.sha256
+            M11_INTERNAL_ENTRY_AB_GRADLE.log
+            M11_INTERNAL_ENTRY_AB_APK_CONTENTS.log
+            M11_INTERNAL_ENTRY_AB_APK_SHA256.txt
+            M11_RAWPY_IDENTITY.json
+            M11_SYNTHETIC_DNG.txt
+            M11_RAWPY_SELFTEST_DUMP.txt
+          if-no-files-found: ignore
+
+      - name: Upload internal-entry A/B APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M11Cam-RENDER1H-INTERNAL-ENTRY-AB
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
