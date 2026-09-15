@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "tools" / "m11_internal_entry_reference.py"
+LIVE_MAIN = ROOT / "research" / "xiaomi" / "xiaomi15ultra_main_sourcecal_live_20260909.json"
 spec = importlib.util.spec_from_file_location("m11_internal_entry_reference", MODULE_PATH)
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
@@ -43,6 +45,29 @@ class M11InternalEntryReferenceTests(unittest.TestCase):
         self.assertLess(comparison.max_abs_residual_after_scalar, 0.0132)
         self.assertLess(comparison.rms_residual_after_scalar, 0.0075)
         self.assertAlmostEqual(comparison.direct_k_relative_ev, 0.05078886518674954, places=12)
+
+    def test_live_xiaomi_source_entry_comparison(self) -> None:
+        live = json.loads(LIVE_MAIN.read_text())
+        source = np.asarray(live["sourcecal2a_result"]["sensor_to_xyz_d50"], dtype=np.float64)
+        comparison = module.compare_source_entries(source)
+
+        self.assertAlmostEqual(comparison.best_scalar_old_to_direct, 0.9655747553431321, places=12)
+        self.assertAlmostEqual(comparison.direct_relative_ev, 0.05054013712227328, places=12)
+        self.assertLess(comparison.max_abs_residual_after_scalar, 0.02239)
+        self.assertLess(comparison.rms_residual_after_scalar, 0.01197)
+
+        np.testing.assert_allclose(
+            comparison.direct_camera_to_internal,
+            np.array(
+                [
+                    [2.469731667134, -0.022913787986, 0.35782244549],
+                    [-0.05144263295, 1.073912068766, -0.09213789348],
+                    [-0.145491444702, -0.547184140182, 2.56705434225],
+                ]
+            ),
+            rtol=0.0,
+            atol=5e-12,
+        )
 
     def test_internal_entry_does_not_add_another_white_balance(self) -> None:
         # This boundary accepts XYZ D50 from the source adapter and only applies K.
