@@ -1,0 +1,25 @@
+name: R2A M11 internal entry reference
+on:
+  push:
+    branches: [work/render1h-cat42yq3a-placement1a]
+    paths:
+      - 'tools/m11_internal_entry_reference.py'
+      - 'tests/test_m11_internal_entry_reference.py'
+      - 'renderer/m11_core/reference_basis.py'
+      - '.github/workflows/r2a-m11-internal-entry-reference.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependency
+        run: python -m pip install --quiet numpy
+      - name: Run internal-entry reference tests
+        run: python -m unittest tests.test_m11_internal_entry_reference -v
