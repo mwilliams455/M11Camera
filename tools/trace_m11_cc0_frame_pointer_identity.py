@@ -3,15 +3,13 @@ from __future__ import annotations
 import argparse,hashlib,struct
 from pathlib import Path
 from capstone import Cs,CS_ARCH_ARM,CS_MODE_ARM,CS_MODE_LITTLE_ENDIAN
+from capstone.arm import ARM_OP_MEM,ARM_OP_REG
 EXPECTED='28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
 START=0x01500000;END=0x01C00000
-R2Y=0x0176E75C;CM=0x016EB010;FRAME_GLOBAL=0x43433774
-R2Y_CALLS=[0x0176D948,0x0176DD94,0x017B878C,0x017B8C88,0x017B9118,0x017B95E0,0x017B99CC,0x017BA0D4,0x017BA52C,0x017BA99C,0x017BAE0C,0x017BB27C]
+FRAME_GLOBAL=0x43433774
+AAA_LO=0x016CDE50;AAA_HI=0x016CF988
+STORE_SITES=[0x01794780,0x01795ADC]
 def u32(d,a):return struct.unpack_from('<I',d,a)[0] if 0<=a<=len(d)-4 else None
-def sx(v,b):s=1<<(b-1);return (v^s)-s
-def blt(a,w):
- if w is None or ((w>>25)&7)!=5 or ((w>>24)&1)!=1:return None
- return (a+8+(sx(w&0xffffff,24)<<2))&0xffffffff
 def push(w):return w is not None and (w&0x0fff0000)==0x092d0000 and (w&(1<<14))
 def fs(d,a,window=0x40000):
  for p in range(a&~3,max(START,(a&~3)-window),-4):
@@ -38,40 +36,39 @@ def main():
  ap=argparse.ArgumentParser();ap.add_argument('unpacked',type=Path);ap.add_argument('--output',type=Path,required=True);a=ap.parse_args()
  d=a.unpacked.read_bytes();h=hashlib.sha256(d).hexdigest()
  if h!=EXPECTED:raise SystemExit(h)
- md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.skipdata=True
- funcs=set([R2Y,CM])
- for c in R2Y_CALLS:funcs.add(fs(d,c))
- callers={t:[] for t in funcs}
- for p in range(START,END,4):
-  t=blt(p,u32(d,p))
-  if t in callers:callers[t].append(p)
- L=['# M11 CM frame pointer -> R2Y arg3 identity trace','',f'- SHA256 `{h}`','']
- aaaf=fs(d,0x016CEFE4)
- L += [f'## AAA dispatcher function start `0x{aaaf:08X}`','```asm']+[fmt(i) for i in md.disasm(d[aaaf:min(aaaf+0x180,0x016CED80)],aaaf)]+['```','## AAA -> CM pointer handoff','```asm']+[fmt(i) for i in md.disasm(d[0x016CEFC8:0x016CEFF0],0x016CEFC8)]+['```','']
+ md=Cs(CS_ARCH_ARM,CS_MODE_ARM|CS_MODE_LITTLE_ENDIAN);md.detail=True;md.skipdata=True
+ L=['# M11 current-frame pointer alias closure','',f'- SHA256 `{h}`','']
+ # 1) Trace r2 backwards at the only direct pointer installs.
+ for site in STORE_SITES:
+  f=fs(d,site);lo=max(f,site-0x180);hi=site+0x30
+  L += [f'## Pointer install `0x{site:08X}` function `0x{f:08X}`','```asm']+[fmt(i) for i in md.disasm(d[lo:hi],lo)]+['```','']
+ # 2) Find how AAA local [fp-0x24] is assigned and later used as source of +0xFC frame.
+ L += ['## AAA local-state provenance for [fp,#-0x24]','']
+ for i in md.disasm(d[AAA_LO:AAA_HI],AAA_LO):
+  if i.id==0:continue
+  if '#-0x24' in i.op_str:
+   lo=max(AAA_LO,i.address-0x50);hi=min(AAA_HI,i.address+0x58)
+   L += [f'### use `0x{i.address:08X}`','```asm']+[fmt(x) for x in md.disasm(d[lo:hi],lo)]+['```','']
+ # 3) Search for pointer copies into any struct+0xFC, especially sourced from FRAME_GLOBAL or same producer calls.
+ L += ['## Stores to structure offset +0xFC','']
+ hits=[]
+ for i in md.disasm(d[START:END],START):
+  if i.id==0 or not i.mnemonic.startswith('str'):continue
+  mems=[o for o in i.operands if o.type==ARM_OP_MEM]
+  if not mems:continue
+  if (mems[-1].mem.disp & 0xffffffff)!=0xfc:continue
+  hits.append(i.address)
+ for a0 in hits:
+  f=fs(d,a0);lo=max(f,a0-0x48);hi=a0+0x28
+  seq=[fmt(x) for x in md.disasm(d[lo:hi],lo)]
+  L += [f'### +0xFC store `0x{a0:08X}` func `0x{f:08X}`','```asm']+seq+['```','']
+ # 4) References to FRAME_GLOBAL near a +0xFC store, or direct source-setting contexts.
+ L += [f'## References to current-frame global `0x{FRAME_GLOBAL:08X}` near alias writes','']
  rr=refs(d,FRAME_GLOBAL)
- L += [f'## Global `0x{FRAME_GLOBAL:08X}` references',f'- total refs `{len(rr)}`','']
- # Classify every reference by the next few instructions so writes are visible without dumping the giant controller.
  for p,q,r in rr:
-  seq=list(md.disasm(d[p:min(END,q+0x24)],p))
-  text=' | '.join(fmt(i) for i in seq)
-  iswrite=any(i.mnemonic.startswith('str') and f'[r{r}' in i.op_str for i in seq)
-  isload=any(i.mnemonic.startswith('ldr') and f'[r{r}' in i.op_str for i in seq)
-  if iswrite:
-   L.append(f'- WRITE ref `0x{p:08X}` func `0x{fs(d,p):08X}`: `{text}`')
- L += ['','### Representative load contexts','']
- for p,q,r in rr[:40]:
-  seq=list(md.disasm(d[p:min(END,q+0x18)],p));text=' | '.join(fmt(i) for i in seq)
-  if any(i.mnemonic.startswith('ldr') and f'[r{r}' in i.op_str for i in seq):L.append(f'- LOAD ref `0x{p:08X}`: `{text}`')
- # R2Y call parent chain retained only for the still wrappers that pass FRAME_GLOBAL as r1.
- for c in R2Y_CALLS:
-  f=fs(d,c)
-  L += ['',f'## R2Y call `0x{c:08X}` wrapper `0x{f:08X}`','### prologue','```asm']+[fmt(i) for i in md.disasm(d[f:min(c,f+0x40)],f)]+['```','### call window','```asm']+[fmt(i) for i in md.disasm(d[max(f,c-0x40):c+0x18],max(f,c-0x40))]+['```']
- seen=set()
- for c in R2Y_CALLS:
-  f=fs(d,c)
-  for pc in callers.get(f,[]):
-   if pc in seen:continue
-   seen.add(pc);pf=fs(d,pc)
-   L += ['',f'## Parent `0x{pc:08X}` -> wrapper `0x{f:08X}`','```asm']+[fmt(i) for i in md.disasm(d[max(pf,pc-0x50):pc+0x18],max(pf,pc-0x50))]+['```']
+  lo=max(START,p-0x30);hi=min(END,q+0x50)
+  text=' | '.join(fmt(x) for x in md.disasm(d[lo:hi],lo))
+  if '#0xfc' in text or p in range(0x01794600,0x01794800) or p in range(0x01795980,0x01795b40):
+   L.append(f'- ref `0x{p:08X}` func `0x{fs(d,p):08X}`: `{text}`')
  a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text('\n'.join(L)+'\n');print(a.output)
 if __name__=='__main__':main()
