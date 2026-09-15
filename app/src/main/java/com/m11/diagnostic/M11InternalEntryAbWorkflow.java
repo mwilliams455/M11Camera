@@ -236,10 +236,12 @@ public final class M11InternalEntryAbWorkflow {
         boolean swapsAxes = orientation >= 5 && orientation <= 8;
         long expectedWidth = swapsAxes ? meta.imageHeight : meta.imageWidth;
         long expectedHeight = swapsAxes ? meta.imageWidth : meta.imageHeight;
-        if (bitmap.getWidth() != expectedWidth || bitmap.getHeight() != expectedHeight) {
+        int actualWidth = bitmap.getWidth();
+        int actualHeight = bitmap.getHeight();
+        if (actualWidth != expectedWidth || actualHeight != expectedHeight) {
             bitmap.recycle();
             throw new IOException(branch + ": LibRaw-oriented bitmap dimensions mismatch: got " +
-                    bitmap.getWidth() + "x" + bitmap.getHeight() + " expected " +
+                    actualWidth + "x" + actualHeight + " expected " +
                     expectedWidth + "x" + expectedHeight + " for TIFF orientation " + orientation);
         }
     }
@@ -255,7 +257,7 @@ public final class M11InternalEntryAbWorkflow {
         return obj;
     }
 
-    private static JSONArray jsonArray(double[] values) {
+    private static JSONArray jsonArray(double[] values) throws Exception {
         JSONArray out = new JSONArray();
         for (double value : values) out.put(value);
         return out;
