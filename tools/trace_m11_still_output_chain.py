@@ -30,7 +30,6 @@ KEYWORDS = (
     "encode", "jfif", "exif", "b2b_r2y", "img_wfq_job_b2b_r2y",
 )
 JPEG_KEYS = {"jpeg", "jpg", "stillencoder", "still encoder", "encoder_still", "fj_encoder_still", "encode", "jfif"}
-R2Y_KEYS = {"r2y", "ycc", "ycbcr", "yyw", "chroma", "b2b_r2y", "img_wfq_job_b2b_r2y"}
 
 
 def u32(data: bytes, off: int) -> int:
@@ -156,8 +155,6 @@ def main() -> None:
         raise ValueError(f"unexpected unpacked SHA-256 {digest}")
     md = disassembler()
 
-    # Build a compact string dictionary once. Keep all strings so known-function
-    # MOVW/MOVT constants can resolve even if a keyword appears late in a format string.
     all_strings: dict[int, str] = {}
     semantic = []
     for off, text in ascii_strings(data):
@@ -168,8 +165,6 @@ def main() -> None:
             semantic.append({"offset": off, "text": text[:500], "keywords": keys})
     runtime_to_raw = {((off + DATA_AFFINE) & 0xFFFFFFFF): off for off in all_strings}
 
-    # Aligned literal-pool references only. This is cheap and gives candidate
-    # JPEG/still functions without globally disassembling tens of MB of code.
     wanted = {row["offset"] for row in semantic}
     wanted_runtime = {((off + DATA_AFFINE) & 0xFFFFFFFF): off for off in wanted}
     literal_refs: dict[int, list[int]] = defaultdict(list)
@@ -181,7 +176,6 @@ def main() -> None:
     for row in semantic:
         row["literal_refs"] = literal_refs.get(row["offset"], [])
 
-    # Candidate JPEG/still semantic functions from literal refs only.
     jpeg_candidates: dict[int, list[dict]] = defaultdict(list)
     for row in semantic:
         if not (set(row["keywords"]) & JPEG_KEYS):
@@ -191,8 +185,6 @@ def main() -> None:
             if entry is not None:
                 jpeg_candidates[entry].append(row)
 
-    # Trace known still job, its parent functions, and one caller generation above
-    # those parents. This is the relevant chain and keeps the probe deterministic.
     chain: dict[int, dict] = {}
 
     def add_function(entry: int, reason: str):
@@ -216,15 +208,12 @@ def main() -> None:
             parent_entries.append(entry)
             add_function(entry, f"direct caller at 0x{callsite:08X}")
 
-    grand_entries = []
     for parent in sorted(set(parent_entries)):
         for callsite in direct_callers(data, parent):
             entry = nearest_prologue(md, data, callsite)
             if entry is not None:
-                grand_entries.append(entry)
                 add_function(entry, f"caller of parent 0x{parent:08X} at 0x{callsite:08X}")
 
-    # Direct call intersection with JPEG semantic candidates.
     jpeg_entries = set(jpeg_candidates)
     intersections = []
     for entry, info in chain.items():
@@ -268,7 +257,8 @@ def main() -> None:
         ]
         if info["strings"]:
             for raw, at, text in info["strings"]:
-                lines.append(f"- `0x{at:08X}` → string `0x{raw:08X}`: `{text[:260].replace('`', "'")}`")
+                safe_text = text[:260].replace("`", "'")
+                lines.append(f"- `0x{at:08X}` → string `0x{raw:08X}`: `{safe_text}`")
         else:
             lines.append("No keyword-bearing constructed string pointer in this function.")
         lines += ["", "### Direct BL targets", ""]
