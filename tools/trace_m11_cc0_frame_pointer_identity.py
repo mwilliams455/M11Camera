@@ -48,23 +48,30 @@ def main():
  L=['# M11 CM frame pointer -> R2Y arg3 identity trace','',f'- SHA256 `{h}`','']
  aaaf=fs(d,0x016CEFE4)
  L += [f'## AAA dispatcher function start `0x{aaaf:08X}`','```asm']+[fmt(i) for i in md.disasm(d[aaaf:min(aaaf+0x180,0x016CED80)],aaaf)]+['```','## AAA -> CM pointer handoff','```asm']+[fmt(i) for i in md.disasm(d[0x016CEFC8:0x016CEFF0],0x016CEFC8)]+['```','']
- # Current-frame global references and their functions.
- rr=refs(d,FRAME_GLOBAL);L += [f'## Global `0x{FRAME_GLOBAL:08X}` references',f'- refs `{[(hex(p),hex(q),r) for p,q,r in rr]}`','']
- seenf=set()
+ rr=refs(d,FRAME_GLOBAL)
+ L += [f'## Global `0x{FRAME_GLOBAL:08X}` references',f'- total refs `{len(rr)}`','']
+ # Classify every reference by the next few instructions so writes are visible without dumping the giant controller.
  for p,q,r in rr:
-  f=fs(d,p)
-  if f in seenf:continue
-  seenf.add(f);L += [f'### function `0x{f:08X}` using current-frame global; direct callers `{[hex(x) for x in callers.get(f,[])]}`','```asm']
-  L += [fmt(i) for i in md.disasm(d[f:min(END,f+0x240)],f)]+['```','']
- # R2Y caller functions
+  seq=list(md.disasm(d[p:min(END,q+0x24)],p))
+  text=' | '.join(fmt(i) for i in seq)
+  iswrite=any(i.mnemonic.startswith('str') and f'[r{r}' in i.op_str for i in seq)
+  isload=any(i.mnemonic.startswith('ldr') and f'[r{r}' in i.op_str for i in seq)
+  if iswrite:
+   L.append(f'- WRITE ref `0x{p:08X}` func `0x{fs(d,p):08X}`: `{text}`')
+ L += ['','### Representative load contexts','']
+ for p,q,r in rr[:40]:
+  seq=list(md.disasm(d[p:min(END,q+0x18)],p));text=' | '.join(fmt(i) for i in seq)
+  if any(i.mnemonic.startswith('ldr') and f'[r{r}' in i.op_str for i in seq):L.append(f'- LOAD ref `0x{p:08X}`: `{text}`')
+ # R2Y call parent chain retained only for the still wrappers that pass FRAME_GLOBAL as r1.
  for c in R2Y_CALLS:
-  f=fs(d,c);L += [f'## R2Y call `0x{c:08X}` containing function `0x{f:08X}`',f'- direct callers of containing function: `{[hex(x) for x in callers.get(f,[])]}`','### prologue / early argument saves','```asm']
-  L += [fmt(i) for i in md.disasm(d[f:min(c,f+0x120)],f)]+['```','### call window','```asm']+[fmt(i) for i in md.disasm(d[max(f,c-0x80):c+0x20],max(f,c-0x80))]+['```','']
+  f=fs(d,c)
+  L += ['',f'## R2Y call `0x{c:08X}` wrapper `0x{f:08X}`','### prologue','```asm']+[fmt(i) for i in md.disasm(d[f:min(c,f+0x40)],f)]+['```','### call window','```asm']+[fmt(i) for i in md.disasm(d[max(f,c-0x40):c+0x18],max(f,c-0x40))]+['```']
  seen=set()
  for c in R2Y_CALLS:
   f=fs(d,c)
   for pc in callers.get(f,[]):
    if pc in seen:continue
-   seen.add(pc);pf=fs(d,pc);L += [f'## Parent call `0x{pc:08X}` -> wrapper `0x{f:08X}` parent func `0x{pf:08X}`','```asm']+[fmt(i) for i in md.disasm(d[max(pf,pc-0x90):pc+0x28],max(pf,pc-0x90))]+['```','']
+   seen.add(pc);pf=fs(d,pc)
+   L += ['',f'## Parent `0x{pc:08X}` -> wrapper `0x{f:08X}`','```asm']+[fmt(i) for i in md.disasm(d[max(pf,pc-0x50):pc+0x18],max(pf,pc-0x50))]+['```']
  a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text('\n'.join(L)+'\n');print(a.output)
 if __name__=='__main__':main()
