@@ -1,0 +1,35 @@
+name: R2A M11 Cat42 boundary oracle
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/verify_m11_cat42_boundary_oracle.py"
+      - "tools/apply_render1h_cat42yq3a.py"
+      - "research/reproduced/M11P_261_CAT42_INTEGER_SEAM_STATUS1A_20260915.md"
+      - ".github/workflows/r2a-m11-cat42-boundary-oracle.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  boundary-oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify current Cat42 integer candidate
+        run: python tools/verify_m11_cat42_boundary_oracle.py
+
+      - name: Verify closure/status markers
+        run: |
+          grep -Fq 'CSY scale = stored_code / 512.0' research/reproduced/M11P_261_CAT42_INTEGER_SEAM_STATUS1A_20260915.md
+          grep -Fq 'category42IntegerConventionHardwareExact=false' tools/apply_render1h_cat42yq3a.py
+          grep -Fq 'category42RegisterPlusOneScaleSemanticsApplied=false' tools/apply_render1h_cat42yq3a.py
+          echo 'Cat42 boundary oracle and provenance markers are locked.'
