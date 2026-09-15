@@ -19,6 +19,7 @@ def blt(a,w):
 def push(w):return w is not None and (w&0x0fff0000)==0x092d0000 and (w&(1<<14))
 def fmt(i):return f'0x{i.address:08X}: {i.mnemonic} {i.op_str}'.rstrip()
 def imms(i):
+ if i.id==0:return []
  out=[]
  for o in i.operands:
   if o.type==ARM_OP_IMM:out.append(o.imm&0xffffffff)
@@ -46,9 +47,7 @@ def main():
    if t==CM_FINISH:cm_calls.append(i.address)
  getter_funcs=set(fs(x) for x in getter_calls)
  hit_funcs=set(fs(x) for xs in hits.values() for x in xs)
- # Find direct callers only for functions we actually care about.
- direct_callers=defaultdict(list)
- cared=hit_funcs|getter_funcs|{R2Y_CTRL,R2Y_BUILDER,R2Y_MCC_WRITER,CM_FINISH}
+ direct_callers=defaultdict(list);cared=hit_funcs|getter_funcs|{R2Y_CTRL,R2Y_BUILDER,R2Y_MCC_WRITER,CM_FINISH}
  for p in range(START,END,4):
   t=blt(p,u32(d,p))
   if t in cared:direct_callers[t].append(p)
@@ -62,8 +61,7 @@ def main():
    for off,name in FIELDS.items():
     if off in vals and name not in out:out.append(name)
   return out
- L=['# M11 dynamic ColorSpec CC0 -> hardware identity trace','',f'- SHA256 `{h}`',
- '- Exact producer map: `frame+0x1F8 <- ColorSpec root+0x28` (44-byte dynamic CC0), `frame+0x250 <- calibration+0x40` (CM1), `frame+0x278 <- calibration+0x70` (CM2), `frame+0x2A0 <- root+0x82` (48-byte auxiliary block).','']
+ L=['# M11 dynamic ColorSpec CC0 -> hardware identity trace','',f'- SHA256 `{h}`','- Exact producer map: `frame+0x1F8 <- ColorSpec root+0x28` (44-byte dynamic CC0), `frame+0x250 <- calibration+0x40` (CM1), `frame+0x278 <- calibration+0x70` (CM2), `frame+0x2A0 <- root+0x82` (48-byte auxiliary block).','']
  L += ['## Producer caller',f'- `0x{CM_FINISH:08X}` calls: `{[hex(x) for x in cm_calls]}`','']
  L += ['## GET_FRAME users',f'- calls `{len(getter_calls)}`; funcs `{[hex(x) for x in sorted(getter_funcs)]}`','']
  for off,name in FIELDS.items():
@@ -72,8 +70,7 @@ def main():
    f=fs(x);sp=special_calls.get(f,[])
    L += [f'### `0x{x:08X}` func `0x{f:08X}` GET_FRAME={f in getter_funcs} special=`{[(hex(c),hex(t)) for c,t in sp]}` callers=`{[hex(c) for c in direct_callers.get(f,[])]}`','```asm']+context(x)+['```','']
  L += ['## Intersection: GET_FRAME functions touching CM fields','']
- for f in sorted(getter_funcs & hit_funcs):
-  L.append(f'- `0x{f:08X}` touches `{function_touches(f)}` special `{[(hex(c),hex(t)) for c,t in special_calls.get(f,[])]}` callers `{[hex(c) for c in direct_callers.get(f,[])]}`')
+ for f in sorted(getter_funcs & hit_funcs):L.append(f'- `0x{f:08X}` touches `{function_touches(f)}` special `{[(hex(c),hex(t)) for c,t in special_calls.get(f,[])]}` callers `{[hex(c) for c in direct_callers.get(f,[])]}`')
  L += ['','## Known R2Y direct callers','']
  for t in (R2Y_CTRL,R2Y_BUILDER,R2Y_MCC_WRITER):L.append(f'- `0x{t:08X}` callers `{[hex(c) for c in direct_callers.get(t,[])]}`')
  for f,cs in sorted(special_calls.items()):
