@@ -27,6 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin aab01bda048cd55756a516e1abc2cf2728da6abf
+          git fetch --no-tags --depth=1 origin c7e0e36d8560c76813ef41be0d257ba13a1c6502
           git show aab01bda048cd55756a516e1abc2cf2728da6abf:.github/workflows/r2a-m11-mcc-078c-xrefs.yml > /tmp/acquire.yml
           python - <<'PY'
           import subprocess, yaml
@@ -44,6 +45,7 @@ jobs:
           git rev-parse HEAD > /tmp/stillpath1a/revision.txt
           git diff --stat c7e0e36d8560c76813ef41be0d257ba13a1c6502 HEAD > /tmp/stillpath1a/research_changes.txt
       - name: Include decoder wheel for offline evidence checks
+        if: always()
         run: |
           python -m pip download --quiet --no-deps --only-binary=:all: capstone==5.0.6 -d /tmp/stillpath1a/wheels
       - uses: actions/upload-artifact@v4
