@@ -1,0 +1,89 @@
+name: M11 CAPTURE1B PERF1A photo-only renderer
+on:
+  workflow_dispatch:
+  push:
+    branches: [work/capture1b-perf1a]
+    paths: ['tools/perf1a/**', '.github/workflows/m11-capture1b-perf1a.yml']
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+      NDK_VERSION: 27.2.12479018
+      M11_LIBRAW_PATH: ${{ github.workspace }}/work/LibRaw
+      M11_LIBRAW_CMAKE_PATH: ${{ github.workspace }}/work/LibRaw-cmake
+      M11_REFERENCE_ASSET_SHA256: 54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - name: Install pinned decoder oracle and recipe parser
+        run: |
+          python -m pip install -r requirements/m11_raw_oracle.txt PyYAML==6.0.2
+      - name: Reproduce tested CAPTURE1A prerequisite and its tests
+        run: python tools/perf1a/recipe.py prepare
+      - name: Apply photo-only path and prove synthetic pixel parity
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/perf1a/*.py
+          python tools/perf1a/apply.py | tee M11_PERF1A_PATCH.txt
+          python tools/perf1a/test_parity.py | tee M11_PERF1A_PARITY_TEST.txt
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools}
+      - name: Install frozen SDK and decoder sources
+        run: |
+          python tools/perf1a/recipe.py sdk
+          python tools/perf1a/recipe.py decoder
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.6.0'}
+      - name: Compile camera, run regression tests and build APK
+        run: python tools/perf1a/recipe.py build
+      - name: Verify launcher signature asset and frozen boundaries
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          unzip -p "$apk" assets/m11_reference_tables_v1.bin > /tmp/m11-asset.bin
+          test "$(sha256sum /tmp/m11-asset.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee M11_PERF1A_BADGING.txt
+          grep -q "package: name='com.m11.diagnostic.capture1b'" M11_PERF1A_BADGING.txt
+          grep -q "versionName='0.2.1-capture1b-perf1a'" M11_PERF1A_BADGING.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk" > M11_PERF1A_SIGNATURE.txt
+          sha256sum "$apk" > M11_PERF1A_APK_SHA256.txt
+          git rev-parse HEAD > M11_PERF1A_REVISION.txt
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          f=json.loads(Path('M11_PERF1A_FREEZE.json').read_text())
+          for p,h in f['before'].items():
+              assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==h,p
+          assert f['compilerFlagsChanged'] is False
+          print('13 capture/source/target/compiler boundaries unchanged after build')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: M11-CAPTURE1B-PERF1A-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M11-CAPTURE1B-PERF1A-evidence
+          path: |
+            M11_*.json
+            M11_*.txt
+            M11_*.log
+            tools/perf1a/*
+            app/src/main/cpp/m11_render_jni.cpp
+            app/src/main/cpp/m11_production_pixel.h
+            app/src/main/java/com/m11/diagnostic/M11RenderOutputWriter.java
+            app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+            app/build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: warn
