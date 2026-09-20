@@ -1,0 +1,74 @@
+name: R2A M11 MCC register state 1A
+on:
+  workflow_dispatch:
+  push:
+    branches: [work/mcc-stillpath1a-20260920]
+    paths: ['.github/workflows/r2a-m11-mccstate1a.yml']
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install --quiet PyYAML==6.0.2
+      - name: Acquire hash-pinned canonical firmware
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin aab01bda048cd55756a516e1abc2cf2728da6abf
+          git fetch --no-tags --depth=1 origin af7259fcd5d9069fa2ac9357afc9403ceb99f9b8
+          git show aab01bda048cd55756a516e1abc2cf2728da6abf:.github/workflows/r2a-m11-mcc-078c-xrefs.yml > /tmp/acquire.yml
+          python - <<'PY'
+          import subprocess, yaml
+          from pathlib import Path
+          steps = yaml.safe_load(Path('/tmp/acquire.yml').read_text())['jobs']['trace']['steps']
+          for name in ('Acquire exact updater', 'Decompress and verify'):
+              matches = [s['run'] for s in steps if s.get('name') == name]
+              if len(matches) != 1: raise RuntimeError('acquisition anchor mismatch: ' + name)
+              subprocess.run(['bash', '-euo', 'pipefail', '-c', matches[0]], check=True)
+          PY
+      - name: Export bounded code and data evidence without inferring runtime state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mccstate1a
+          python - <<'PY'
+          import hashlib, json, struct
+          from pathlib import Path
+          data = Path('/tmp/M11P.bin').read_bytes()
+          expected = '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
+          if hashlib.sha256(data).hexdigest() != expected: raise ValueError('noncanonical firmware')
+          gates = {0x01732750: '08d04de200482de904b08de2', 0x017703C8: 'e008ffeb', 0x01B6031C: '1eff2fe1'}
+          for at, value in gates.items():
+              if data[at:at+len(bytes.fromhex(value))].hex() != value: raise ValueError('byte gate mismatch: ' + hex(at))
+          ranges = {
+              'candidate_code': (0x01560000, 0x01C90000),
+              'r2y_rodata': (0x030B7000, 0x03100000),
+              'r2y_pointer_image': (0x03758A00, 0x03758B00),
+              'map_pointer_image': (0x038D1200, 0x038D1400),
+          }
+          out = Path('/tmp/mccstate1a')
+          manifest = {'firmware_sha256': expected, 'firmware_bytes': len(data), 'ranges': {},
+              'qualification': 'Firmware file slices, not runtime register or RAM dumps. Candidate code can contain data. Runtime-minus-delta pointer-image ranges do not establish runtime contents.'}
+          for name, (lo, hi) in ranges.items():
+              raw = data[lo:hi]
+              if len(raw) != hi-lo: raise ValueError('range truncated')
+              (out/(name+'.bin')).write_bytes(raw)
+              manifest['ranges'][name] = {'start': lo, 'end_exclusive': hi, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+          (out/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
+          print(json.dumps(manifest, indent=2))
+          PY
+          git rev-parse HEAD > /tmp/mccstate1a/revision.txt
+          git diff --stat af7259fcd5d9069fa2ac9357afc9403ceb99f9b8 HEAD > /tmp/mccstate1a/research_changes.txt
+          cp .github/workflows/r2a-m11-mccstate1a.yml /tmp/mccstate1a/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r2a-m11-mccstate1a
+          path: /tmp/mccstate1a/*
+          retention-days: 14
+      - if: always()
+        run: rm -f /tmp/LEICA_M11-P_2.6.1.FW /tmp/M11P.bin
