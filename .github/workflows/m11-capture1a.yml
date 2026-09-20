@@ -1,0 +1,126 @@
+name: M11 CAPTURE1A portable camera APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [work/capture1a-portable]
+    paths: ['tools/capture1a/**', '.github/workflows/m11-capture1a.yml']
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+      NDK_VERSION: 27.2.12479018
+      M11_LIBRAW_PATH: ${{ github.workspace }}/work/LibRaw
+      M11_LIBRAW_CMAKE_PATH: ${{ github.workspace }}/work/LibRaw-cmake
+      M11_REFERENCE_ASSET_SHA256: 54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - name: Install frozen RAW oracle and recipe parser
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements/m11_raw_oracle.txt
+          python -m pip install PyYAML==6.0.2
+      - name: Materialize and test the pinned portable renderer prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess, yaml
+          from pathlib import Path
+          p=Path('.github/workflows/m11-render1j-deviceport1a.yml')
+          expected='2f8fa35ce284f35d7d0684ca47bb3454faae4375'
+          if subprocess.check_output(['git','hash-object',str(p)],text=True).strip()!=expected:
+              raise RuntimeError('portable prerequisite recipe changed')
+          steps=yaml.safe_load(p.read_text())['jobs']['portable']['steps']
+          for name in ('Materialize unchanged reference assets and RENDER1I prerequisite', 'Apply source capability and metadata portability only', 'Portable native and source-metadata tests'):
+              selected=[s['run'] for s in steps if s.get('name')==name]
+              if len(selected)!=1: raise RuntimeError('recipe anchor mismatch: '+name)
+              subprocess.run(['bash','-euo','pipefail','-c',selected[0]],check=True)
+          PY
+      - name: Apply CAPTURE1A and test timestamp ownership and orientation
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/capture1a/apply.py
+          python tools/capture1a/apply.py | tee M11_CAPTURE1A_PATCH.txt
+          mkdir -p work/capture_classes
+          javac -d work/capture_classes tools/capture1a/M11CaptureCore.java tools/capture1a/CaptureCoreSelfTest.java
+          java -cp work/capture_classes com.m11.diagnostic.CaptureCoreSelfTest | tee M11_CAPTURE1A_CORE_TEST.txt
+          grep -q 'com.m11.diagnostic.capture1a' app/build.gradle.kts
+          grep -q '0.2.0-capture1a' app/build.gradle.kts
+          grep -q 'new DngCreator(source.sensor,pair.result)' app/src/main/java/com/m11/diagnostic/M11CaptureController.java
+          grep -q 'M11RenderWorkflow.runCaptured' app/src/main/java/com/m11/diagnostic/M11CaptureActivity.java
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools}
+      - name: Install pinned Android build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+      - name: Fetch pinned decoder sources
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git "$M11_LIBRAW_PATH"
+          git -C "$M11_LIBRAW_PATH" checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git "$M11_LIBRAW_CMAKE_PATH"
+          git -C "$M11_LIBRAW_CMAKE_PATH" checkout --detach "$LIBRAW_CMAKE_COMMIT"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.6.0'}
+      - name: Compile camera, run regression tests and assemble APK
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace 2>&1 | tee M11_CAPTURE1A_GRADLE.log
+      - name: Verify APK, launcher, signature and unchanged target
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          unzip -p "$apk" assets/m11_reference_tables_v1.bin > /tmp/m11-asset.bin
+          test "$(sha256sum /tmp/m11-asset.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee M11_CAPTURE1A_BADGING.txt
+          grep -q "package: name='com.m11.diagnostic.capture1a'" M11_CAPTURE1A_BADGING.txt
+          grep -q "com.m11.diagnostic.M11CaptureActivity" M11_CAPTURE1A_BADGING.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk" > M11_CAPTURE1A_SIGNATURE.txt
+          sha256sum "$apk" > M11_CAPTURE1A_APK_SHA256.txt
+          git rev-parse HEAD > M11_CAPTURE1A_REVISION.txt
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          report=json.loads(Path('M11_CAPTURE1A_FROZEN_HASHES.json').read_text())
+          for p,h in report['before'].items():
+              assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==h,p
+          print('11 frozen source/RAW/renderer/output files unchanged after build')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: M11-CAPTURE1A-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M11-CAPTURE1A-evidence
+          path: |
+            M11_*.txt
+            M11_*.json
+            M11_*.log
+            app/build/test-results/testDebugUnitTest/*.xml
+            app/src/main/java/com/m11/diagnostic/M11Capture*.java
+            app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+            app/src/main/AndroidManifest.xml
+            app/build.gradle.kts
+            tools/capture1a/*
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M11-CAPTURE1A-android-api
+          path: ${{ env.ANDROID_HOME }}/platforms/android-36/android.jar
+          if-no-files-found: warn
