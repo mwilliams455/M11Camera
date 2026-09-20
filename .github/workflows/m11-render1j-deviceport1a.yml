@@ -1,0 +1,118 @@
+name: M11 RENDER1J DEVICEPORT1A APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [work/render1j-deviceport1a]
+    paths: ['tools/deviceport1a/**', '.github/workflows/m11-render1j-deviceport1a.yml']
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LIBRAW_COMMIT: b860248a89d9082b8e0a1e202e516f46af9adb29
+      LIBRAW_CMAKE_COMMIT: eb98e4325aef2ce85d2eb031c2ff18640ca616d3
+      NDK_VERSION: 27.2.12479018
+      M11_LIBRAW_PATH: ${{ github.workspace }}/work/LibRaw
+      M11_LIBRAW_CMAKE_PATH: ${{ github.workspace }}/work/LibRaw-cmake
+      M11_REFERENCE_ASSET_SHA256: 54415604a45dc4ed704ebbbe6b089a946593032f464fdca0a86af6ef4be94219
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - name: Install frozen RAW oracle
+        run: python -m pip install --disable-pip-version-check -r requirements/m11_raw_oracle.txt
+      - name: Materialize unchanged reference assets and RENDER1I prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest tests.test_materialize_m11_reference_tables -v
+          python tools/materialize_m11_embedded_asset.py
+          test "$(wc -c < app/src/main/assets/m11_reference_tables_v1.bin)" -eq 23150
+          test "$(sha256sum app/src/main/assets/m11_reference_tables_v1.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+          python tools/validate_m11_raw_oracle_environment.py | tee M11_RAWPY_IDENTITY.json
+          PYTHONPATH=. python tools/generate_m11_android_python_parity_fixture.py --out app/src/test/resources/m11_python_android_parity_v1.b64
+          mkdir -p app/src/main/assets work/rawpy_selftest
+          python tools/generate_m11_synthetic_dng.py --out app/src/main/assets/apk1a_synthetic.dng
+          python tools/dump_m11_rawpy_pixel_parity.py app/src/main/assets/apk1a_synthetic.dng work/rawpy_selftest
+          cp work/rawpy_selftest/mosaic_u16le.bin app/src/main/assets/apk1a_expected_mosaic_u16le.bin
+          cp work/rawpy_selftest/ahd_u16le.bin app/src/main/assets/apk1a_expected_ahd_u16le.bin
+          python tools/apply_render1h_cat42yq3a.py
+          python tools/apply_render1h_device_labels.py
+          python tools/apply_render1i_directk1a.py
+      - name: Apply source capability and metadata portability only
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/deviceport1a/*.py
+          python tools/deviceport1a/apply.py | tee M11_DEVICEPORT_PATCH.txt
+          grep -q 'applicationId = "com.m11.diagnostic.render1j"' app/build.gradle.kts
+          grep -q 'versionName = "0.1.13-render1j-deviceport1a"' app/build.gradle.kts
+          ! grep -q 'kMake\|kModel\|kWidth\|realXiaomiIdentityGate' app/src/main/cpp/m11_render_jni.cpp
+          grep -q 'M11InternalEntryCore.cameraToInternal(source.cameraToXyzD50)' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+          grep -q 'M11InternalEntryCore.withIdentityCc0(asset.tables)' app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+      - name: Portable native and source-metadata tests
+        run: |
+          set -euo pipefail
+          mkdir -p work/deviceport_classes work/deviceport_fixtures
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined,address tools/deviceport1a/portable_gate_test.cpp -o work/portable_gate_test
+          ./work/portable_gate_test | tee M11_DEVICEPORT_GATE_TEST.txt
+          python tools/deviceport1a/source_fixtures.py --out work/deviceport_fixtures --decode | tee M11_DEVICEPORT_FIXTURE_TEST.txt
+          javac -d work/deviceport_classes app/src/main/java/com/m11/diagnostic/DngMetadataReader.java app/src/main/java/com/m11/diagnostic/M11SourceAdapterCore.java app/src/main/java/com/m11/diagnostic/M11PortableSourceCore.java tools/deviceport1a/PortableSourceSelfTest.java
+          java -cp work/deviceport_classes com.m11.diagnostic.PortableSourceSelfTest work/deviceport_fixtures/*.dng | tee M11_DEVICEPORT_SOURCE_TEST.txt
+      - uses: android-actions/setup-android@v3
+        with: {packages: platform-tools}
+      - name: Install pinned Android build tools
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;${NDK_VERSION}" "cmake;3.22.1"
+      - name: Fetch pinned decoder sources
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw.git "$M11_LIBRAW_PATH"
+          git -C "$M11_LIBRAW_PATH" checkout --detach "$LIBRAW_COMMIT"
+          git clone --filter=blob:none https://github.com/LibRaw/LibRaw-cmake.git "$M11_LIBRAW_CMAKE_PATH"
+          git -C "$M11_LIBRAW_CMAKE_PATH" checkout --detach "$LIBRAW_CMAKE_COMMIT"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.6.0'}
+      - name: Run regression tests and build portable APK
+        run: |
+          set -o pipefail
+          gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace 2>&1 | tee M11_DEVICEPORT_GRADLE.log
+      - name: Inspect APK identity and frozen target asset
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' -print -quit)
+          test -n "$apk"
+          unzip -l "$apk" | tee M11_DEVICEPORT_APK_CONTENTS.txt
+          grep -q 'lib/arm64-v8a/libm11rawjni.so' M11_DEVICEPORT_APK_CONTENTS.txt
+          unzip -p "$apk" assets/m11_reference_tables_v1.bin > /tmp/m11-asset.bin
+          test "$(sha256sum /tmp/m11-asset.bin | cut -d' ' -f1)" = "$M11_REFERENCE_ASSET_SHA256"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > M11_DEVICEPORT_BADGING.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$apk" > M11_DEVICEPORT_SIGNATURE.txt
+          sha256sum "$apk" > M11_DEVICEPORT_APK_SHA256.txt
+          git rev-parse HEAD > M11_DEVICEPORT_REVISION.txt
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: M11Cam-RENDER1J-DEVICEPORT1A
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: M11-DEVICEPORT1A-evidence
+          path: |
+            M11_*.txt
+            M11_*.json
+            M11_*.log
+            app/build/test-results/testDebugUnitTest/*.xml
+            work/deviceport_fixtures/*
+            app/src/main/cpp/m11_render_jni.cpp
+            app/src/main/java/com/m11/diagnostic/M11RenderWorkflow.java
+            app/src/main/java/com/m11/diagnostic/DngMetadataReader.java
+          if-no-files-found: warn
