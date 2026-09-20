@@ -42,7 +42,7 @@ jobs:
           data = Path('/tmp/M11P.bin').read_bytes()
           expected = '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
           if hashlib.sha256(data).hexdigest() != expected: raise ValueError('noncanonical firmware')
-          gates = {0x01732750: '08d04de200482de904b08de2', 0x017703C8: 'e008ffeb', 0x01B6031C: '1eff2fe1'}
+          gates = {0x01732750: '08d04de200482de904b08de2', 0x017703C8: 'e008ffeb', 0x01B6031C: '0088bde8'}
           for at, value in gates.items():
               if data[at:at+len(bytes.fromhex(value))].hex() != value: raise ValueError('byte gate mismatch: ' + hex(at))
           ranges = {
