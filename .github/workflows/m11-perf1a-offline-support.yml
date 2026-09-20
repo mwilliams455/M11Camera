@@ -1,0 +1,32 @@
+name: M11 PERF1A offline support
+on:
+  workflow_dispatch:
+  push:
+    branches: [work/capture1b-perf1a]
+    paths: ['.github/workflows/m11-perf1a-offline-support.yml']
+permissions:
+  contents: read
+jobs:
+  support:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Export pinned sources and decoder wheels only
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/m11-offline/wheels
+          git fetch --no-tags --depth=1 origin 53864283eaa002b2cf4ab8bced7cf47990bbe2bf
+          git archive 53864283eaa002b2cf4ab8bced7cf47990bbe2bf | gzip > /tmp/m11-offline/source.tar.gz
+          python -m pip download --only-binary=:all: --no-deps rawpy==0.27.1 -d /tmp/m11-offline/wheels
+          python -m pip download --only-binary=:all: numpy==2.2.6 PyYAML==6.0.2 -d /tmp/m11-offline/wheels
+          cd /tmp/m11-offline
+          sha256sum source.tar.gz wheels/* > SHA256SUMS
+          printf '%s\n' 'Public source/dependencies only; no user photograph or private diagnostic uploaded.' > SCOPE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M11-PERF1A-offline-support
+          path: /tmp/m11-offline/*
+          retention-days: 14
