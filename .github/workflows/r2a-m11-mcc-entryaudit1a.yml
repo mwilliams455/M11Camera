@@ -6,6 +6,7 @@ on:
     branches: [work/render1h-cat42yq3a-placement1a]
     paths:
       - 'tools/trace_m11_mcc_entryaudit1a.py'
+      - 'tools/trace_m11_mcc_livecontrols1a.py'
       - '.github/workflows/r2a-m11-mcc-entryaudit1a.yml'
 
 permissions:
@@ -22,7 +23,7 @@ jobs:
       - run: python -m pip install --quiet capstone==5.0.6 PyYAML==6.0.2
       - name: Compile and unit-check branch decoder
         run: |
-          python -m py_compile tools/trace_m11_mcc_entryaudit1a.py
+          python -m py_compile tools/trace_m11_mcc_entryaudit1a.py tools/trace_m11_mcc_livecontrols1a.py
           PYTHONPATH=tools python - <<'PY'
           from trace_m11_mcc_entryaudit1a import arm_branch
           assert arm_branch(0x1000, 0xEB000002)['target'] == 0x1010
@@ -51,6 +52,11 @@ jobs:
           PY
       - name: Audit ordinal sequence and exact MCC entry boundary
         run: python tools/trace_m11_mcc_entryaudit1a.py /tmp/M11P.bin --output-dir /tmp/mcc-entryaudit1a
+      - name: Trace MCC-related live controls and still-IQ wrappers
+        run: |
+          python tools/trace_m11_mcc_livecontrols1a.py /tmp/M11P.bin --output-dir /tmp/mcc-entryaudit1a/livecontrols
+          cp tools/trace_m11_mcc_entryaudit1a.py tools/trace_m11_mcc_livecontrols1a.py /tmp/mcc-entryaudit1a/
+          git diff --stat aab01bda048cd55756a516e1abc2cf2728da6abf HEAD > /tmp/mcc-entryaudit1a/research_changes.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
