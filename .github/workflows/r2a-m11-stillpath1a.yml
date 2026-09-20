@@ -44,7 +44,8 @@ jobs:
           git rev-parse HEAD > /tmp/stillpath1a/revision.txt
           git diff --stat c7e0e36d8560c76813ef41be0d257ba13a1c6502 HEAD > /tmp/stillpath1a/research_changes.txt
       - name: Include decoder wheel for offline evidence checks
-        run: python -m pip download --quiet --no-deps --only-binary=:all: capstone==5.0.6 -d /tmp/stillpath1a/wheels
+        run: |
+          python -m pip download --quiet --no-deps --only-binary=:all: capstone==5.0.6 -d /tmp/stillpath1a/wheels
       - uses: actions/upload-artifact@v4
         if: always()
         with:
