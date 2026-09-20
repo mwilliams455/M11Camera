@@ -110,7 +110,8 @@ def main() -> None:
    if runtime is not None:
     static=(runtime-DELTA)&0xFFFFFFFF; text=cstring(data,static)
     if text: strings.append({'at':at,'runtime':runtime,'static':static,'text':text})
- graph=root_graph(data); (out/'graph.json')).write_text(json.dumps(graph,indent=2)+'\n')
+ graph=root_graph(data)
+ (out/'graph.json').write_text(json.dumps(graph,indent=2)+'\n')
  for label,entry,low,high in [('selector',0x178D0A8,0x178A800,0x178D0D8),('init',0x1B1B9C8,0x1B18000,0x1B1BB1C)]:
   (out/(label+'_graph.json')).write_text(json.dumps(root_graph(data,entry,low,high),indent=2)+'\n')
  targets={ROOT,0x01732754,0x0172C19C,0x0178D0A8,MCC,GETTER,0x01B1833C,0x01B18404,0x01B1B9C8,0x01B1CDA4}
