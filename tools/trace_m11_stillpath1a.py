@@ -11,15 +11,15 @@ from pathlib import Path
 import struct
 EXPECTED = '28528c24555f93ff69b6f6f4d47f8802719d47f5ddbe1d6dcad25d1840f35e3c'
 DELTA = 0x3FAA87D0
-ROOT = 0x01732754
+ROOT = 0x01732750
 LO, HI = 0x0172C19C, 0x01732A64
 MCC, GETTER = 0x01B2D324, 0x01B6B388
 CODE_LO, CODE_HI = 0x01600000, 0x01C90000
 RANGES = {
  'still_iq': (LO, HI),
  'still_job': (0x0176E6F8, 0x0177045C),
- 'parameter_selector': (0x0178C000, 0x0178E800),
- 'r2y_reset_manager': (0x01B1833C, 0x01B188D0),
+ 'parameter_selector': (0x0178A800, 0x0178E800),
+ 'r2y_reset_manager': (0x01B18000, 0x01B1B9C8),
  'r2y_init_common': (0x01B1B9C8, 0x01B1E3EC),
  'mcc_writer': (MCC, 0x01B60320),
  'rdma_helpers': (0x01B6B000, 0x01B6B800),
@@ -45,14 +45,14 @@ def pair_value(w: int, t: int) -> int | None:
  if w&0x0FF00000!=0x03000000 or t&0x0FF00000!=0x03400000: return None
  if (w>>12)&15!=(t>>12)&15 or w>>28!=t>>28 or w>>28==15: return None
  return (((w>>4)&0xF000)|(w&0xFFF)|((((t>>4)&0xF000)|(t&0xFFF))<<16))
-def root_graph(data: bytes) -> dict:
+def root_graph(data: bytes, root: int = ROOT, lo: int = LO, hi: int = HI) -> dict:
  """Conservative CFG: unresolved PC writes stop traversal, not fall through.
  Calls within named IQ range are followed; external calls remain boundaries.
  """
  import capstone as cs
  from capstone.arm import ARM_REG_PC
  md=cs.Cs(cs.CS_ARCH_ARM,cs.CS_MODE_ARM|cs.CS_MODE_LITTLE_ENDIAN); md.detail=True
- pending_functions=[ROOT]; functions={}
+ pending_functions=[root]; functions={}
  while pending_functions:
   entry=pending_functions.pop()
   if entry in functions: continue
@@ -60,7 +60,7 @@ def root_graph(data: bytes) -> dict:
   while pending:
    at=pending.pop()
    if at in seen: continue
-   if not LO<=at<HI:
+   if not lo<=at<hi:
     unresolved.append({'at':at,'reason':'outside IQ range'}); continue
    seen.add(at)
    ins=next(md.disasm(data[at:at+4],at,count=1),None)
@@ -70,10 +70,10 @@ def root_graph(data: bytes) -> dict:
    if b:
     if b['kind'] in ('BL','BLX'):
      calls.append(b)
-     if b['state']=='A32' and LO<=b['target']<HI: pending_functions.append(b['target'])
+     if b['state']=='A32' and lo<=b['target']<hi: pending_functions.append(b['target'])
      pending.append(at+4)
     else:
-     if LO<=b['target']<HI: pending.append(b['target'])
+     if lo<=b['target']<hi: pending.append(b['target'])
      else: tails.append(b)
      if b['conditional']: pending.append(at+4)
     continue
@@ -84,17 +84,18 @@ def root_graph(data: bytes) -> dict:
    if ins.mnemonic.startswith(('str','stm','vstr','vstm')):
     stores.append({'at':at,'text':ins.mnemonic+' '+ins.op_str})
    try: _,written=ins.regs_access()
-   except cs.CsError: written=[]
+   except cs.CsError:
+    unresolved.append({'at':at,'reason':'register-access analysis failed'}); continue
    if ins.mnemonic.startswith(('bx','blx')) or ARM_REG_PC in written:
     unresolved.append({'at':at,'reason':'unresolved control transfer','text':ins.mnemonic+' '+ins.op_str}); continue
    pending.append(at+4)
   functions[entry]={'entry':entry,'visited':sorted(seen),'calls':calls,'tail_branches':tails,'returns':returns,'unresolved':unresolved,'stores':stores}
- return {'root':ROOT,'bounds':[LO,HI],'functions':list(functions.values()),'qualification':'external calls are boundaries; no claim of MCC inactivity or identity'}
+ return {'root':root,'bounds':[lo,hi],'functions':list(functions.values()),'qualification':'external calls are boundaries; no claim of MCC inactivity or identity'}
 def main() -> None:
  ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('unpacked',type=Path); ap.add_argument('--output-dir',type=Path,required=True); args=ap.parse_args()
  data=args.unpacked.read_bytes(); sha=hashlib.sha256(data).hexdigest()
  if sha!=EXPECTED: raise ValueError('noncanonical firmware: '+sha)
- if data[ROOT:ROOT+8].hex()!='00482de904b08de2': raise ValueError('root prologue mismatch')
+ if data[ROOT:ROOT+12].hex()!='08d04de200482de904b08de2': raise ValueError('root prologue mismatch')
  if data[0x01732A60:0x01732A64].hex()!='1eff2fe1': raise ValueError('root return mismatch')
  import capstone as cs
  md=cs.Cs(cs.CS_ARCH_ARM,cs.CS_MODE_ARM|cs.CS_MODE_LITTLE_ENDIAN); md.skipdata=True
@@ -109,8 +110,10 @@ def main() -> None:
    if runtime is not None:
     static=(runtime-DELTA)&0xFFFFFFFF; text=cstring(data,static)
     if text: strings.append({'at':at,'runtime':runtime,'static':static,'text':text})
- graph=root_graph(data); (out/'graph.json').write_text(json.dumps(graph,indent=2)+'\n')
- targets={ROOT,0x0172C19C,0x0178D0A8,MCC,GETTER,0x01B1833C,0x01B18404,0x01B1B9C8,0x01B1CDA4}
+ graph=root_graph(data); (out/'graph.json')).write_text(json.dumps(graph,indent=2)+'\n')
+ for label,entry,low,high in [('selector',0x178D0A8,0x178A800,0x178D0D8),('init',0x1B1B9C8,0x1B18000,0x1B1BB1C)]:
+  (out/(label+'_graph.json')).write_text(json.dumps(root_graph(data,entry,low,high),indent=2)+'\n')
+ targets={ROOT,0x01732754,0x0172C19C,0x0178D0A8,MCC,GETTER,0x01B1833C,0x01B18404,0x01B1B9C8,0x01B1CDA4}
  targets|={c['target'] for f in graph['functions'] for c in f['calls']}
  refs=[]
  for at in range(CODE_LO,CODE_HI,4):
