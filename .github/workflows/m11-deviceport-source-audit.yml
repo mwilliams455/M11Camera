@@ -1,0 +1,33 @@
+name: M11 device portability source audit
+on:
+  workflow_dispatch:
+  push:
+    branches: [work/render1j-deviceport1a]
+    paths: ['.github/workflows/m11-deviceport-source-audit.yml']
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect source snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/deviceport/m11 /tmp/deviceport/m9 /tmp/deviceport/mono
+          git archive HEAD | tar -x -C /tmp/deviceport/m11
+          git rev-parse HEAD > /tmp/deviceport/m11_revision.txt
+          git clone -q --no-checkout https://github.com/mwilliams455/M9Camera_refresh.git /tmp/m9repo
+          git -C /tmp/m9repo archive f5ce9888f62e3f6dced298a0edaf537005fc7d5b | tar -x -C /tmp/deviceport/m9
+          echo f5ce9888f62e3f6dced298a0edaf537005fc7d5b > /tmp/deviceport/m9_revision.txt
+          git clone -q --depth 1 --branch research/deviceport3a-rawstride-pack1a https://github.com/mwilliams455/MMonochrome.git /tmp/monorepo
+          git -C /tmp/monorepo archive HEAD | tar -x -C /tmp/deviceport/mono
+          git -C /tmp/monorepo rev-parse HEAD > /tmp/deviceport/mono_revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: M11-deviceport-source-audit
+          path: /tmp/deviceport
+          include-hidden-files: true
+          retention-days: 14
